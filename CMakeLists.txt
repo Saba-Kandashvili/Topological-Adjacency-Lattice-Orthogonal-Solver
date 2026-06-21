@@ -20,7 +20,7 @@ endif()
 
 # 2. CREATE the library target from the source files.
 # This is the most important step. The target "CGSME" now exists.
-add_library(${PROJECT_NAME} SHARED ${CGSME_SOURCES})
+add_library(${PROJECT_NAME} STATIC ${CGSME_SOURCES})
 
 # 3. MODIFY the target to tell the compiler where to find header files.
 # This will now work because CMake knows what "CGSME" is.
