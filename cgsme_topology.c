@@ -243,13 +243,13 @@ void regionMarkerPacked(uint16_t **grid, uint32_t width, uint32_t length, uint16
 	grid[y][x] = (regionID << 4) | index;
 
 	// recurse
-	if (mask & South_Open_Mask)
+	if (mask & Tiles_Opening_North)
 		regionMarkerPacked(grid, width, length, regionID, x, y - 1);
-	if (mask & North_Open_Mask)
+	if (mask & Tiles_Opening_South)
 		regionMarkerPacked(grid, width, length, regionID, x, y + 1);
-	if (mask & West_Open_Mask)
+	if (mask & Tiles_Opening_East)
 		regionMarkerPacked(grid, width, length, regionID, x + 1, y);
-	if (mask & East_Open_Mask)
+	if (mask & Tiles_Opening_West)
 		regionMarkerPacked(grid, width, length, regionID, x - 1, y);
 }
 
@@ -277,51 +277,66 @@ void regionMarkerIterative(uint16_t **grid, uint32_t width, uint32_t length, uin
 		uint8_t idx = packed & 0xF;
 		uint16_t mask = indexToMask(idx);
 
-		// LOGIC CLONED FROM RECURSIVE FUNCTION:
-
-		// South -> y-1
-		if (mask & South_Open_Mask)
+		// North -> (cy - 1) current must open North AND North neighbor must open South
+		if ((mask & Tiles_Opening_North) && cy > 0)
 		{
-			if ((int32_t)cy - 1 >= 0 && grid[cy - 1][cx] <= 15 && grid[cy - 1][cx] != 0xFFFF)
+			uint16_t neighborPacked = grid[cy - 1][cx];
+			if (neighborPacked <= 15 && neighborPacked != 0xFFFF)
 			{
-				uint8_t nIdx = (uint8_t)grid[cy - 1][cx];
-				grid[cy - 1][cx] = (regionID << 4) | nIdx;
-				queue[tail++] = (TopoNode){cx, cy - 1};
+				uint8_t nIdx = (uint8_t)neighborPacked;
+				uint16_t nMask = indexToMask(nIdx);
+				if (nMask & Tiles_Opening_South) // bidirectional check
+				{
+					grid[cy - 1][cx] = (regionID << 4) | nIdx;
+					queue[tail++] = (TopoNode){cx, cy - 1};
+				}
 			}
 		}
 
-		// North -> y+1
-		if (mask & North_Open_Mask)
+		// South -> (cy + 1) current must open South AND South neighbor must open North
+		if ((mask & Tiles_Opening_South) && cy + 1 < length)
 		{
-			if (cy + 1 < length && grid[cy + 1][cx] <= 15 && grid[cy + 1][cx] != 0xFFFF)
+			uint16_t neighborPacked = grid[cy + 1][cx];
+			if (neighborPacked <= 15 && neighborPacked != 0xFFFF)
 			{
-				uint8_t nIdx = (uint8_t)grid[cy + 1][cx];
-				grid[cy + 1][cx] = (regionID << 4) | nIdx;
-				queue[tail++] = (TopoNode){cx, cy + 1};
+				uint8_t nIdx = (uint8_t)neighborPacked;
+				uint16_t nMask = indexToMask(nIdx);
+				if (nMask & Tiles_Opening_North)
+				{
+					grid[cy + 1][cx] = (regionID << 4) | nIdx;
+					queue[tail++] = (TopoNode){cx, cy + 1};
+				}
 			}
 		}
 
-		// West -> x+1 (Wait, really?)
-		// Recursive: if (mask & West) ... x+1
-		if (mask & West_Open_Mask)
+		// EAST (cx + 1) current must open East AND East neighbor must open West
+		if ((mask & Tiles_Opening_East) && cx + 1 < width)
 		{
-			if (cx + 1 < width && grid[cy][cx + 1] <= 15 && grid[cy][cx + 1] != 0xFFFF)
+			uint16_t neighborPacked = grid[cy][cx + 1];
+			if (neighborPacked <= 15 && neighborPacked != 0xFFFF)
 			{
-				uint8_t nIdx = (uint8_t)grid[cy][cx + 1];
-				grid[cy][cx + 1] = (regionID << 4) | nIdx;
-				queue[tail++] = (TopoNode){cx + 1, cy};
+				uint8_t nIdx = (uint8_t)neighborPacked;
+				uint16_t nMask = indexToMask(nIdx);
+				if (nMask & Tiles_Opening_West)
+				{
+					grid[cy][cx + 1] = (regionID << 4) | nIdx;
+					queue[tail++] = (TopoNode){cx + 1, cy};
+				}
 			}
 		}
-
-		// East -> x-1
-		// Recursive: if (mask & East) ... x-1
-		if (mask & East_Open_Mask)
+		// WEST (cx - 1) current must open West AND West neighbor must open East
+		if ((mask & Tiles_Opening_West) && cx > 0)
 		{
-			if ((int32_t)cx - 1 >= 0 && grid[cy][cx - 1] <= 15 && grid[cy][cx - 1] != 0xFFFF)
+			uint16_t neighborPacked = grid[cy][cx - 1];
+			if (neighborPacked <= 15 && neighborPacked != 0xFFFF)
 			{
-				uint8_t nIdx = (uint8_t)grid[cy][cx - 1];
-				grid[cy][cx - 1] = (regionID << 4) | nIdx;
-				queue[tail++] = (TopoNode){cx - 1, cy};
+				uint8_t nIdx = (uint8_t)neighborPacked;
+				uint16_t nMask = indexToMask(nIdx);
+				if (nMask & Tiles_Opening_East)
+				{
+					grid[cy][cx - 1] = (regionID << 4) | nIdx;
+					queue[tail++] = (TopoNode){cx - 1, cy};
+				}
 			}
 		}
 	}
@@ -341,39 +356,31 @@ void sealMazeEdges(uint16_t **gridLayer, uint32_t width, uint32_t length)
 
 			uint8_t flags = 0;
 
-			// 1. Check North Neighbor (y-1)
-			// We need to know if they point DOWN (South) to us.
-			// Tiles with South ports are in North_Open_Mask.
+			// 1. Check North Neighbor (y-1): does it point DOWN (South) to us?
 			if (y > 0 && gridLayer[y - 1][x] != Empty_Tile)
 			{
-				if (gridLayer[y - 1][x] & North_Open_Mask)
+				if (gridLayer[y - 1][x] & Tiles_Opening_South)
 					flags |= DIR_N;
 			}
 
-			// 2. Check South Neighbor (y+1)
-			// We need to know if they point UP (North) to us.
-			// Tiles with North ports are in South_Open_Mask.
+			// 2. Check South Neighbor (y+1): does it point UP (North) to us?
 			if (y < length - 1 && gridLayer[y + 1][x] != Empty_Tile)
 			{
-				if (gridLayer[y + 1][x] & South_Open_Mask)
+				if (gridLayer[y + 1][x] & Tiles_Opening_North)
 					flags |= DIR_S;
 			}
 
-			// 3. Check West Neighbor (x-1)
-			// We need to know if they point RIGHT (East) to us.
-			// Tiles with East ports are in West_Open_Mask.
+			// 3. Check West Neighbor (x-1): does it point RIGHT (East) to us?
 			if (x > 0 && gridLayer[y][x - 1] != Empty_Tile)
 			{
-				if (gridLayer[y][x - 1] & West_Open_Mask)
+				if (gridLayer[y][x - 1] & Tiles_Opening_East)
 					flags |= DIR_W;
 			}
 
-			// 4. Check East Neighbor (x+1)
-			// We need to know if they point LEFT (West) to us.
-			// Tiles with West ports are in East_Open_Mask.
+			// 4. Check East Neighbor (x+1): does it point LEFT (West) to us?
 			if (x < width - 1 && gridLayer[y][x + 1] != Empty_Tile)
 			{
-				if (gridLayer[y][x + 1] & East_Open_Mask)
+				if (gridLayer[y][x + 1] & Tiles_Opening_West)
 					flags |= DIR_E;
 			}
 

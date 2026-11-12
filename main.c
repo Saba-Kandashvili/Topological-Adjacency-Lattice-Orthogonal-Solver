@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     // 2. Configuration
     uint32_t width = 100;
     uint32_t length = 100;
-    uint32_t height = 3;
+    uint32_t height = 30;
     // uint32_t seed = time(NULL);
     uint32_t seed = 5;
     uint32_t fulness = 70;
@@ -97,8 +97,7 @@ int main(int argc, char **argv)
             }
 
             printf("BENCH: generateGrid elapsed=%llu us (%.6f s)\n", (unsigned long long)(end_us - start_us), seconds);
-            printf("STATS: Filled %llu / %llu tiles (%.1f%%)\n", filled_tiles, total_tiles, ((float)filled_tiles / total_tiles) * 100.0f);
-
+            printf("STATS: Filled %llu / %llu tiles (%.1f%%)\n", (unsigned long long)filled_tiles, (unsigned long long)total_tiles, ((float)filled_tiles / total_tiles) * 100.0f);
             freeGrid(grid, width, length, height);
         }
         else

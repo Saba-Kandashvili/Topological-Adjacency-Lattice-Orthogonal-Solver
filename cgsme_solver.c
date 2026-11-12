@@ -7,31 +7,31 @@
 bool isTileRequired(uint16_t **grid, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
 {
 	CGSME_PROFILE_FUNC();
-	// check NNORTH neighbor (y-1). points down (SOUTH)
-	// 'North_Open_Mask' in tiles.h defines tiles that have a SOUTH port
+	// check NORTH neighbor (y-1). Does it open SOUTH toward us?
 	if (y > 0 && __builtin_popcount(grid[y - 1][x]) == 1)
 	{
-		if (grid[y - 1][x] & North_Open_Mask)
+		if (grid[y - 1][x] & Tiles_Opening_South)
 			return true;
 	}
 
-	// check SOUTH neighbor (y+1). It points up (NORTH).
-	// 'South_Open_Mask' defines tiles that have a NORTH
+	// check SOUTH neighbor (y+1). Does it open NORTH toward us?
 	if (y < length - 1 && __builtin_popcount(grid[y + 1][x]) == 1)
 	{
-		if (grid[y + 1][x] & South_Open_Mask)
+		if (grid[y + 1][x] & Tiles_Opening_North)
 			return true;
 	}
 
+	// check EAST neighbor (x+1). Does it open WEST toward us?
 	if (x < width - 1 && __builtin_popcount(grid[y][x + 1]) == 1)
 	{
-		if (grid[y][x + 1] & East_Open_Mask)
+		if (grid[y][x + 1] & Tiles_Opening_West)
 			return true;
 	}
 
+	// check WEST neighbor (x-1). Does it open EAST toward us?
 	if (x > 0 && __builtin_popcount(grid[y][x - 1]) == 1)
 	{
-		if (grid[y][x - 1] & West_Open_Mask)
+		if (grid[y][x - 1] & Tiles_Opening_East)
 			return true;
 	}
 
@@ -173,7 +173,7 @@ void collapseTile(uint16_t *tile, float *rates, uint32_t *rng)
 	}
 }
 
-void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y, MinHeap *heap, float **distMap, uint32_t *rng)
+void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y, MinHeap *heap, uint32_t *rng)
 {
 #ifdef cgsme_DEBUG
 	uint64_t __cgsme_neigh_start = cgsme_now_us();
@@ -304,7 +304,7 @@ void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uin
 
 		if (heap && gridLayer[y][x - 1] != oldVal)
 		{
-			heapInsertOrUpdate(heap, gridLayer, x - 1, y, distMap, rng);
+			heapInsertOrUpdate(heap, gridLayer, x - 1, y, rng);
 		}
 	}
 
@@ -319,7 +319,7 @@ void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uin
 
 		if (heap && gridLayer[y][x + 1] != oldVal)
 		{
-			heapInsertOrUpdate(heap, gridLayer, x + 1, y, distMap, rng);
+			heapInsertOrUpdate(heap, gridLayer, x + 1, y, rng);
 		}
 	}
 
@@ -334,7 +334,7 @@ void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uin
 
 		if (heap && gridLayer[y - 1][x] != oldVal)
 		{
-			heapInsertOrUpdate(heap, gridLayer, x, y - 1, distMap, rng);
+			heapInsertOrUpdate(heap, gridLayer, x, y - 1, rng);
 		}
 	}
 
@@ -349,7 +349,7 @@ void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uin
 
 		if (heap && gridLayer[y + 1][x] != oldVal)
 		{
-			heapInsertOrUpdate(heap, gridLayer, x, y + 1, distMap, rng);
+			heapInsertOrUpdate(heap, gridLayer, x, y + 1, rng);
 		}
 	}
 
@@ -364,14 +364,13 @@ void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uin
 #endif
 }
 
-// The scoring logic extracted to a helper
-float calculateScore(uint16_t **grid, uint32_t x, uint32_t y, float **distMap, uint32_t *rng)
+// scoring logic extracted to a helper
+float calculateScore(uint16_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
 {
 	CGSME_PROFILE_FUNC();
 	uint32_t bitNum = __builtin_popcount(grid[y][x]);
-	(void)distMap; // Distance bias removed - mask defines shape now
 
-	// Entropy only - lower entropy = higher priority
+	// entropy only        lower entropy = higher priority
 	float score = (float)bitNum;
 
 	// Tiny random noise to break ties
@@ -379,8 +378,8 @@ float calculateScore(uint16_t **grid, uint32_t x, uint32_t y, float **distMap, u
 	return score + noise;
 }
 
-// Finds the best spot to start a new island (Closest to center that is still unvisited)
-bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, float **distMap, uint32_t *outX, uint32_t *outY, uint32_t *rng)
+// finds the best spot to start a new island (closest unvisited tile to center)
+bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, uint32_t *outX, uint32_t *outY, uint32_t *rng)
 {
 	CGSME_PROFILE_FUNC();
 	float minScore = 1e9;
@@ -398,38 +397,35 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, floa
 
 			int popcount = __builtin_popcount(tile);
 
-			// Skip already-collapsed tiles
+			// skip already collapsed
 			if (popcount == 1)
 				continue;
 
-			// CRITICAL FIX: If popcount is 0, this tile hit a contradiction.
-			// Reset it AND immediately apply neighbor constraints.
+			// if popcount is 0 this tile hit a contradiction
+			// reset AND immediately apply neighbor constraints
 			if (popcount == 0)
 			{
 				grid[i][j] = All_Possible_State;
 
-				// Apply constraints from all collapsed neighbors
-				// Use the same logic as updateNeighbours but in reverse
+				// apply constraints from all collapsed neighbors
+				// same logic as updateNeighbours but in reverse
 
 				// Check North neighbor (y-1, which is i-1)
-				// If neighbor is collapsed, what mask should it have applied to us?
 				if (i > 0)
 				{
 					uint16_t neighbor = grid[i - 1][j];
 					if (neighbor == Empty_Tile)
 					{
-						// Void neighbor = we must close that direction
-						grid[i][j] &= North_Closed_Mask;
+						// Void neighbor to our North = we must close our North side
+						grid[i][j] &= Tiles_Closed_North;
 					}
 					else if (__builtin_popcount(neighbor) == 1)
 					{
-						// Get what mask this neighbor would apply to its South (us)
-						// If neighbor opens South -> we need North_Open_Mask
-						// If neighbor closes South -> we need North_Closed_Mask
-						if (neighbor & North_Open_Mask) // neighbor has south opening
-							grid[i][j] &= South_Open_Mask;
+						// If North neighbor opens South toward us -> we must open North
+						if (neighbor & Tiles_Opening_South)
+							grid[i][j] &= Tiles_Opening_North;
 						else
-							grid[i][j] &= South_Closed_Mask;
+							grid[i][j] &= Tiles_Closed_North;
 					}
 				}
 
@@ -439,14 +435,14 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, floa
 					uint16_t neighbor = grid[i + 1][j];
 					if (neighbor == Empty_Tile)
 					{
-						grid[i][j] &= South_Closed_Mask;
+						grid[i][j] &= Tiles_Closed_South;
 					}
 					else if (__builtin_popcount(neighbor) == 1)
 					{
-						if (neighbor & South_Open_Mask) // neighbor has north opening
-							grid[i][j] &= North_Open_Mask;
+						if (neighbor & Tiles_Opening_North) // South neighbor opens North toward us
+							grid[i][j] &= Tiles_Opening_South;
 						else
-							grid[i][j] &= North_Closed_Mask;
+							grid[i][j] &= Tiles_Closed_South;
 					}
 				}
 
@@ -456,14 +452,14 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, floa
 					uint16_t neighbor = grid[i][j - 1];
 					if (neighbor == Empty_Tile)
 					{
-						grid[i][j] &= West_Closed_Mask;
+						grid[i][j] &= Tiles_Closed_West;
 					}
 					else if (__builtin_popcount(neighbor) == 1)
 					{
-						if (neighbor & West_Open_Mask) // neighbor has east opening
-							grid[i][j] &= East_Open_Mask;
+						if (neighbor & Tiles_Opening_East) // West neighbor opens East toward us
+							grid[i][j] &= Tiles_Opening_West;
 						else
-							grid[i][j] &= East_Closed_Mask;
+							grid[i][j] &= Tiles_Closed_West;
 					}
 				}
 
@@ -473,14 +469,14 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, floa
 					uint16_t neighbor = grid[i][j + 1];
 					if (neighbor == Empty_Tile)
 					{
-						grid[i][j] &= East_Closed_Mask;
+						grid[i][j] &= Tiles_Closed_East;
 					}
 					else if (__builtin_popcount(neighbor) == 1)
 					{
-						if (neighbor & East_Open_Mask) // neighbor has west opening
-							grid[i][j] &= West_Open_Mask;
+						if (neighbor & Tiles_Opening_West) // East neighbor opens West toward us
+							grid[i][j] &= Tiles_Opening_East;
 						else
-							grid[i][j] &= West_Closed_Mask;
+							grid[i][j] &= Tiles_Closed_East;
 					}
 				}
 

@@ -1,8 +1,16 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
+project(CGSME C)
 
-project(CGSME)
+# CMAKE_MSVC_RUNTIME_LIBRARY is ignored unless CMP0091 is NEW. Requiring
+# CMake >= 3.15 makes that the default, but set it explicitly to be safe.
+if(POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)
+endif()
 
-# 1. Gather all your C source files into one list.
+# Statically link the MSVC runtime -> no dependency on vcruntimeXXX.dll /
+# msvcpXXX.dll at load time.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 file(GLOB CGSME_SOURCES
     "generator.c"
     "cgsme_debug.c"
@@ -10,29 +18,39 @@ file(GLOB CGSME_SOURCES
     "cgsme_noise.c"
     "cgsme_topology.c"
     "cgsme_solver.c"
-    "tinycthread/tinycthread.c" 
+    "tinycthread/tinycthread.c"
 )
 
-
-# 2. CREATE the library target from the source files.
-# This is the most important step. The target "CGSME" now exists.
 add_library(${PROJECT_NAME} SHARED ${CGSME_SOURCES})
 
-# 3. MODIFY the target to tell the compiler where to find header files.
-# This will now work because CMake knows what "CGSME" is.
-target_include_directories(${PROJECT_NAME} PUBLIC 
+target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tinycthread"
 )
 
-# 4. MODIFY the target to link necessary system libraries (for Linux).
-# On Android the sysroot provides pthread functionality via Bionic and
-# linking explicitly to -lpthread can fail (NDK's linker can't find -lpthread).
-# Avoid linking pthread when building for Android.
-if(UNIX AND NOT ANDROID)
-    target_link_libraries(${PROJECT_NAME} PRIVATE pthread)
+# Auto-export every public symbol from the DLL even though the sources
+# have no __declspec(dllexport). Works for MSVC and MinGW.
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+# Threading:
+# - Windows: tinycthread's Win32 backend needs no extra thread library, so
+#   skip find_package(Threads) entirely. Linking it on MinGW would pull in
+#   libwinpthread-1.dll unless special-cased, which is one more thing to
+#   get wrong, so just don't link it.
+# - Everywhere else (Linux, macOS): pthread is actually required.
+if (NOT WIN32)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    find_package(Threads REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)
 endif()
 
-# NOTE: Instrumentation files exist under this folder but we intentionally
-# avoid adding compile options or extra definitions here — keep Unity's
-# existing build flow unchanged as requested.
+# Fully static MinGW toolchain runtime -> no dependency on
+# libgcc_s_seh-1.dll / libwinpthread-1.dll / libstdc++-6.dll at load time.
+if (MINGW)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        -static
+        -static-libgcc
+    )
+endif()

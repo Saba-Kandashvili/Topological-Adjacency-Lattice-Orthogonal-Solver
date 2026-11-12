@@ -201,28 +201,35 @@
 // 000000000000000 are free to use for reguion marking
 
 /*
-	Bit masks for collapsing
-
-	we will have 8 bitmasks in total , 2 per direction , one open and one closed
-
-	Naming convention will be Direction_Open/Closed_Mask
+	1. SELF-PORT MASKS: Does THIS tile physically have an opening in direction D?
 */
+#define Tiles_Opening_North (uint16_t)(North_West_Corridor | North_South_Corridor | North_East_Corridor | North_DeadEnd | Normal_X_Corridor | Special_X_Corridor | North_T_Corridor | West_T_Corridor | East_T_Corridor)
 
-#define North_Open_Mask (uint16_t)(South_East_Corridor | North_South_Corridor | South_West_Corridor | South_DeadEnd | Normal_X_Corridor | Special_X_Corridor | South_T_Corridor | East_T_Corridor | West_T_Corridor)
+#define Tiles_Opening_East  (uint16_t)(North_East_Corridor | South_East_Corridor | West_East_Corridor | East_DeadEnd | Normal_X_Corridor | Special_X_Corridor | East_T_Corridor | South_T_Corridor | North_T_Corridor)
 
-#define East_Open_Mask (uint16_t)(North_West_Corridor | South_West_Corridor | West_East_Corridor | West_DeadEnd | Normal_X_Corridor | Special_X_Corridor | South_T_Corridor | West_T_Corridor | North_T_Corridor)
+#define Tiles_Opening_South (uint16_t)(South_East_Corridor | North_South_Corridor | South_West_Corridor | South_DeadEnd | Normal_X_Corridor | Special_X_Corridor | South_T_Corridor | East_T_Corridor | West_T_Corridor)
 
-#define South_Open_Mask (uint16_t)(North_West_Corridor | North_South_Corridor | North_East_Corridor | North_DeadEnd | Normal_X_Corridor | Special_X_Corridor | North_T_Corridor | West_T_Corridor | East_T_Corridor)
+#define Tiles_Opening_West  (uint16_t)(North_West_Corridor | South_West_Corridor | West_East_Corridor | West_DeadEnd | Normal_X_Corridor | Special_X_Corridor | South_T_Corridor | West_T_Corridor | North_T_Corridor)
 
-#define West_Open_Mask (uint16_t)(North_East_Corridor | South_East_Corridor | West_East_Corridor | East_DeadEnd | Normal_X_Corridor | Special_X_Corridor | East_T_Corridor | South_T_Corridor | North_T_Corridor)
+#define Tiles_Closed_North  (uint16_t)(~Tiles_Opening_North)
+#define Tiles_Closed_East   (uint16_t)(~Tiles_Opening_East)
+#define Tiles_Closed_South  (uint16_t)(~Tiles_Opening_South)
+#define Tiles_Closed_West   (uint16_t)(~Tiles_Opening_West)
 
-#define North_Closed_Mask (uint16_t)(~North_Open_Mask)
+/*
+	2. NEIGHBOR CONSTRAINT MASKS (for updateNeighbours):
+	What tiles can my D-neighbor be when I open/close toward D?
+	(e.g., my North neighbor sits at y-1 and connects to me via its SOUTH port)
+*/
+#define North_Open_Mask   Tiles_Opening_South
+#define East_Open_Mask    Tiles_Opening_West
+#define South_Open_Mask   Tiles_Opening_North
+#define West_Open_Mask    Tiles_Opening_East
 
-#define East_Closed_Mask (uint16_t)(~East_Open_Mask)
-
-#define South_Closed_Mask (uint16_t)(~South_Open_Mask)
-
-#define West_Closed_Mask (uint16_t)(~West_Open_Mask)
+#define North_Closed_Mask Tiles_Closed_South
+#define East_Closed_Mask  Tiles_Closed_West
+#define South_Closed_Mask Tiles_Closed_North
+#define West_Closed_Mask  Tiles_Closed_East
 
 // intial state
 
