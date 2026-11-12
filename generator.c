@@ -10,11 +10,7 @@
 #include "generator.h"
 #include "cgsme_debug.h"
 #include "tiles.h"
-#ifdef __linux__
-#include <threads.h>
-#else
 #include "tinycthread/tinycthread.h"
-#endif
 #include "cgsme_utils.h"
 #include "cgsme_noise.h"
 #include "cgsme_topology.h"
@@ -129,6 +125,9 @@ void runArchitect(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t he
 {
     CGSME_PROFILE_FUNC();
 
+    // rand that produces identical numbes on both windows and linux
+    uint32_t rngState = seed;
+
     // because of calloc the grid is already initialized to Empty_Tile (0)
 
     // generate Mask (Ridged Noise + Sanitize + Rescue)
@@ -160,8 +159,8 @@ void runArchitect(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t he
         while (placedCount < stairsPerLayer && attempts < maxAttempts)
         {
             attempts++;
-            int x = rand() % width;
-            int y = rand() % length;
+            int x = nextRandom(&rngState) % width;
+            int y = nextRandom(&rngState) % length;
 
             // bounds
             if (x < 1 || y < 1 || x >= width - 1 || y >= length - 1)
@@ -233,21 +232,6 @@ int generateLayerThread(void *args)
 
     int valid_collapsed_count = 0;
 
-    // 1. DISTANCE MAP (Initialized to 0 if Mask Mode to prevent bias, or standard calculation)
-    float **distMap = malloc(sizeof(float *) * length);
-    for (uint32_t i = 0; i < length; i++)
-    {
-        distMap[i] = malloc(sizeof(float) * width);
-        for (uint32_t j = 0; j < width; j++)
-        {
-            // If Mask Mode, we don't want center-bias, we want mask-bias.
-            // If Ocean Mode, we use center bias.
-            if (fulness < 100)
-                distMap[i][j] = 0.0f;
-            else
-                distMap[i][j] = sqrtf(powf((float)j - startX, 2) + powf((float)i - startY, 2));
-        }
-    }
 
     MinHeap *heap = initHeap(width, length);
 
@@ -259,13 +243,13 @@ int generateLayerThread(void *args)
             if (gridLayer[i][j] == Empty_Tile)
             {
                 // Mask Void: Tell neighbors "I am a wall"
-                updateNeighbours(gridLayer, width, length, j, i, heap, distMap, &rngState);
+                updateNeighbours(gridLayer, width, length, j, i, heap, &rngState);
             }
             else if (__builtin_popcount(gridLayer[i][j]) == 1)
             {
                 // Pre-placed Stairs: Propagate constraints
                 valid_collapsed_count++;
-                updateNeighbours(gridLayer, width, length, j, i, heap, distMap, &rngState);
+                updateNeighbours(gridLayer, width, length, j, i, heap, &rngState);
             }
         }
     }
@@ -274,18 +258,18 @@ int generateLayerThread(void *args)
     if (gridLayer[startY][startX] != Empty_Tile && __builtin_popcount(gridLayer[startY][startX]) > 1)
     {
         gridLayer[startY][startX] = Normal_X_Corridor;
-        updateNeighbours(gridLayer, width, length, startX, startY, heap, distMap, &rngState);
+        updateNeighbours(gridLayer, width, length, startX, startY, heap, &rngState);
         valid_collapsed_count++;
 
         // Add neighbors to heap to kickstart
         if (startY > 0)
-            heapInsertOrUpdate(heap, gridLayer, startX, startY - 1, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX, startY - 1, &rngState);
         if (startY < length - 1)
-            heapInsertOrUpdate(heap, gridLayer, startX, startY + 1, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX, startY + 1, &rngState);
         if (startX > 0)
-            heapInsertOrUpdate(heap, gridLayer, startX - 1, startY, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX - 1, startY, &rngState);
         if (startX < width - 1)
-            heapInsertOrUpdate(heap, gridLayer, startX + 1, startY, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX + 1, startY, &rngState);
     }
 
     // High safety limit for complex masks
@@ -310,7 +294,7 @@ int generateLayerThread(void *args)
         {
             // HEAP EMPTY: Reseed using AGGRESSIVE finder
             // This will pick any tile inside the mask that isn't solved yet
-            if (findBestSeedLocation(gridLayer, width, length, distMap, &cx, &cy, &rngState))
+            if (findBestSeedLocation(gridLayer, width, length, &cx, &cy, &rngState))
             {
                 found = true;
 
@@ -318,18 +302,18 @@ int generateLayerThread(void *args)
                 if (__builtin_popcount(gridLayer[cy][cx]) > 1)
                 {
                     gridLayer[cy][cx] = Normal_X_Corridor;
-                    updateNeighbours(gridLayer, width, length, cx, cy, heap, distMap, &rngState);
+                    updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
                     valid_collapsed_count++;
 
                     // Add neighbors
                     if (cy > 0)
-                        heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, &rngState);
                     if (cy < length - 1)
-                        heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, &rngState);
                     if (cx > 0)
-                        heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, &rngState);
                     if (cx < width - 1)
-                        heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, &rngState);
 
                     continue; // Skip the collapse step for this iteration
                 }
@@ -345,7 +329,7 @@ int generateLayerThread(void *args)
         if (__builtin_popcount(gridLayer[cy][cx]) > 1)
         {
             collapseTile(&gridLayer[cy][cx], current_spawnrates, &rngState);
-            updateNeighbours(gridLayer, width, length, cx, cy, heap, distMap, &rngState);
+            updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
 
             // Note: Because updateNeighbours now revives dead tiles, gridLayer will never be Empty_Tile
             // unless it was Mask Void. It will be All_Possible if it failed.
@@ -356,13 +340,13 @@ int generateLayerThread(void *args)
         // Add neighbors to heap
         // Only add if they are still uncollapsed candidates
         if (cy > 0 && __builtin_popcount(gridLayer[cy - 1][cx]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, &rngState);
         if (cy < length - 1 && __builtin_popcount(gridLayer[cy + 1][cx]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, &rngState);
         if (cx > 0 && __builtin_popcount(gridLayer[cy][cx - 1]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, &rngState);
         if (cx < width - 1 && __builtin_popcount(gridLayer[cy][cx + 1]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, &rngState);
 
         // VOID LOGIC (Only for Ocean Mode)
         // If we hit target count in non-masked mode, start deleting unnecessary tiles
@@ -371,7 +355,7 @@ int generateLayerThread(void *args)
             if (!isTileRequired(gridLayer, width, length, cx, cy))
             {
                 gridLayer[cy][cx] = Empty_Tile;
-                updateNeighbours(gridLayer, width, length, cx, cy, heap, distMap, &rngState);
+                updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
                 valid_collapsed_count--; // Adjust count
             }
         }
@@ -395,9 +379,7 @@ int generateLayerThread(void *args)
 
     // Free memory
     freeHeap(heap);
-    for (uint32_t i = 0; i < length; i++)
-        free(distMap[i]);
-    free(distMap);
+    
 
     // Unpack Regions
     for (uint32_t i = 0; i < length; i++)
@@ -466,8 +448,6 @@ uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint3
             grid[i][j] = &all_data[(i*length + j)*width];
         }
     }
-
-    srand(seed);
 
     // ARCHITECT PHASE
     runArchitect(grid, width, length, height, fulness, seed);
@@ -552,13 +532,13 @@ void cleanGrid(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x
     gridLayer[y][x] = ~gridLayer[y][x];
 
     // if the direction is open then we recursively keep going else return
-    if (tmp & South_Open_Mask)
+    if (tmp & Tiles_Opening_North)
         cleanGrid(gridLayer, width, length, x, y - 1);
-    if (tmp & North_Open_Mask)
+    if (tmp & Tiles_Opening_South)
         cleanGrid(gridLayer, width, length, x, y + 1);
-    if (tmp & West_Open_Mask)
+    if (tmp & Tiles_Opening_East)
         cleanGrid(gridLayer, width, length, x + 1, y);
-    if (tmp & East_Open_Mask)
+    if (tmp & Tiles_Opening_West)
         cleanGrid(gridLayer, width, length, x - 1, y);
 }
 

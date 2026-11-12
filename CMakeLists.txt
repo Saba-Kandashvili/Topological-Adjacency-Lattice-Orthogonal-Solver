@@ -18,16 +18,8 @@ file(GLOB CGSME_SOURCES
     "cgsme_noise.c"
     "cgsme_topology.c"
     "cgsme_solver.c"
+    "tinycthread/tinycthread.c"
 )
-
-# tinycthread gives a native Win32 threading backend on Windows and a
-# pthread wrapper elsewhere that isn't Linux (e.g. macOS). Linux code calls
-# pthread directly, so tinycthread isn't needed there.
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND CGSME_SOURCES
-        "tinycthread/tinycthread.c"
-    )
-endif()
 
 add_library(${PROJECT_NAME} SHARED ${CGSME_SOURCES})
 
