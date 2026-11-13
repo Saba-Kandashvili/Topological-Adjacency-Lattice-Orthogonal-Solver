@@ -5,6 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 pushd "$SCRIPT_DIR" > /dev/null || exit 1
 
 echo "---------------------------------------------------"
+echo "0. Baking tileset.json -> cgsme_tileset_baked.h..."
+echo "---------------------------------------------------"
+
+gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe \
+    && ./cgsme_codegen.exe tileset.json cgsme_tileset_baked.h
+
+if [ $? -ne 0 ]; then
+    echo "Tileset baking failed!"
+    read -r -p "Press Enter to exit..."
+    popd > /dev/null || true
+    exit 1
+fi
+echo ""
+
+echo "---------------------------------------------------"
 echo "1. Compiling C Code..."
 echo "---------------------------------------------------"
 
