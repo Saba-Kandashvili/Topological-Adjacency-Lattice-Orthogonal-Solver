@@ -73,7 +73,7 @@ int main(int argc, char **argv)
     if (cgsme_quick)
     {
         uint64_t start_us = cgsme_now_us();
-        uint16_t ***grid = generateGrid(width, length, height, seed, fulness);
+        cgsme_tile_t ***grid = generateGrid(width, length, height, seed, fulness);
         uint64_t end_us = cgsme_now_us();
 
         if (grid)
@@ -129,7 +129,7 @@ int main(int argc, char **argv)
                     {
                         for (int x = 0; x < width; x++)
                         {
-                            fprintf(f, "%hu", grid[z][y][x]);
+                            fprintf(f, "%llu", (unsigned long long)grid[z][y][x]);
                             if (x < width - 1)
                                 fprintf(f, ",");
                         }

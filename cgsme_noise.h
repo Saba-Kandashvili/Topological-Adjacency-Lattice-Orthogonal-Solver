@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
+#include "tiles.h"
 
 typedef struct
 {
@@ -34,7 +35,7 @@ float getValueNoise(float x, float y, uint32_t seed);
 /// @param startX Starting X coordinate.
 /// @param startY Starting Y coordinate.
 /// @return Number of cells in the region.
-int measureRegionSize(uint16_t ***grid, bool *visited, int width, int length, int startX, int startY);
+int measureRegionSize(cgsme_tile_t ***grid, bool *visited, int width, int length, int startX, int startY);
 
 /// @brief Keep only the largest connected region in the mask.
 /// @param grid Pointer to the 3D grid.
@@ -43,7 +44,7 @@ int measureRegionSize(uint16_t ***grid, bool *visited, int width, int length, in
 /// @param height Grid height.
 /// @param startX Starting X coordinate of largest region.
 /// @param startY Starting Y coordinate of largest region.
-void keepOnlyLargestMask(uint16_t ***grid, int width, int length, int height, int startX, int startY);
+void keepOnlyLargestMask(cgsme_tile_t ***grid, int width, int length, int height, int startX, int startY);
 
 /// @brief Dilate the mask by one pixel.
 /// @param grid Pointer to the 3D grid.
@@ -51,7 +52,7 @@ void keepOnlyLargestMask(uint16_t ***grid, int width, int length, int height, in
 /// @param length Grid length.
 /// @param height Grid height.
 /// @return Number of pixels added.
-int dilateMask(uint16_t ***grid, int width, int length, int height, int maxToAdd);
+int dilateMask(cgsme_tile_t ***grid, int width, int length, int height, int maxToAdd);
 
 /// @brief Generate a ridged noise mask for the grid.
 /// @param grid Pointer to the 3D grid.
@@ -60,7 +61,7 @@ int dilateMask(uint16_t ***grid, int width, int length, int height, int maxToAdd
 /// @param height Grid height.
 /// @param targetFullness Target percentage of filled cells.
 /// @param seed Noise seed.
-void generateRidgedMask(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t targetFullness, uint32_t seed);
+void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t targetFullness, uint32_t seed);
 
 /// @brief Save noise map to debug file.
 /// @param noiseMap Pointer to the noise map.
@@ -72,6 +73,6 @@ void saveNoiseDebug(float *noiseMap, uint32_t width, uint32_t length);
 /// @param grid Pointer to the 3D grid.
 /// @param width Grid width.
 /// @param length Grid length.
-void saveBinaryMaskDebug(uint16_t ***grid, uint32_t width, uint32_t length);
+void saveBinaryMaskDebug(cgsme_tile_t ***grid, uint32_t width, uint32_t length);
 
 #endif // cgsme_NOISE_H

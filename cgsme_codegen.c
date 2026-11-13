@@ -110,6 +110,27 @@ int main(int argc, char **argv)
     for (int c = 0; c < r.num_categories; c++)
         fprintf(f, "%s%s", r.categories[c].natural_spawn ? "true" : "false", (c + 1 < r.num_categories) ? ", " : " };\n\n");
 
+
+    // vertical anchors (architect stairs)
+    // arrays are sized at least 1 so C never sees an illegal zero length array
+    unsigned anchor_slots = (r.num_anchors > 0) ? r.num_anchors : 1;
+
+    fprintf(f, "static const uint8_t  CGSME_ANCHOR_LOWER[%u]   = { ", anchor_slots);
+    for (unsigned a = 0; a < anchor_slots; a++)
+        fprintf(f, "%u%s", (a < r.num_anchors) ? r.anchors[a].lower_tile_id : 0u, (a + 1 < anchor_slots) ? ", " : " };\n");
+
+    fprintf(f, "static const uint8_t  CGSME_ANCHOR_UPPER[%u]   = { ", anchor_slots);
+    for (unsigned a = 0; a < anchor_slots; a++)
+        fprintf(f, "%u%s", (a < r.num_anchors) ? r.anchors[a].upper_tile_id : 0u, (a + 1 < anchor_slots) ? ", " : " };\n");
+
+    fprintf(f, "static const uint32_t CGSME_ANCHOR_DIVISOR[%u] = { ", anchor_slots);
+    for (unsigned a = 0; a < anchor_slots; a++)
+        fprintf(f, "%u%s", (a < r.num_anchors) ? r.anchors[a].density_divisor : 1u, (a + 1 < anchor_slots) ? ", " : " };\n");
+
+    fprintf(f, "static const uint32_t CGSME_ANCHOR_MIN[%u]     = { ", anchor_slots);
+    for (unsigned a = 0; a < anchor_slots; a++)
+        fprintf(f, "%u%s", (a < r.num_anchors) ? r.anchors[a].min_per_layer : 0u, (a + 1 < anchor_slots) ? ", " : " };\n\n");
+
     fprintf(f, "#endif // CGSME_TILESET_BAKED_H\n");
     fclose(f);
     printf("[cgsme_codegen] Generated %s (%u tiles -> uint%u_t)\n", out_path, r.num_tiles, r.container_bits);

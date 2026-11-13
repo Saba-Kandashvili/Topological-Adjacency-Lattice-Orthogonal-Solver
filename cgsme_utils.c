@@ -119,7 +119,7 @@ void bubbleDown(MinHeap *h, uint32_t index)
 }
 
 // Adds a node or Updates it if it already exists
-void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
+void heapInsertOrUpdate(MinHeap *h, cgsme_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
 {
 	CGSME_PROFILE_FUNC();
 	uint32_t mapIdx = y * h->width + x;
@@ -129,7 +129,7 @@ void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, uin
 	if (x >= h->width || y >= h->length)
 		return;
 	// don't add collapsed tiles (1 bit) or broken tiles (0 bits)
-	if (__builtin_popcount(grid[y][x]) <= 1)
+	if (CGSME_POPCOUNT(grid[y][x]) <= 1)
 	{
 		// IF it was in heap, remove it (lazy removal happens on pop usually, but we can do logic here if strictly needed)
 		// for WFC, typically once collapsed we just ignore it.
@@ -164,7 +164,7 @@ void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, uin
 }
 
 // returns true if valid node found, false if empty
-bool heapPop(MinHeap *h, uint16_t **grid, uint32_t *outX, uint32_t *outY)
+bool heapPop(MinHeap *h, cgsme_tile_t **grid, uint32_t *outX, uint32_t *outY)
 {
 	CGSME_PROFILE_FUNC();
 	while (h->count > 0)
@@ -181,16 +181,14 @@ bool heapPop(MinHeap *h, uint16_t **grid, uint32_t *outX, uint32_t *outY)
 		if (h->count > 0)
 			bubbleDown(h, 0);
 
-		// validation: actually uncollapsed?
-		// it's possible we added it to heap, then later it got collapsed by something else?
-		// (Unlikely in single thread, but good safety).
-		if (__builtin_popcount(grid[top.y][top.x]) > 1)
+		// unlikely in single thread, but good safety to check if its been added to the heap adn then later collapsed by something else. (or if it was added to heap, then later collapsed by a neighbor update)
+		if (CGSME_POPCOUNT(grid[top.y][top.x]) > 1)		
 		{
 			*outX = top.x;
 			*outY = top.y;
 			return true;
 		}
-		// IF not valid, loop again (Lazy Deletion)
+		// IF not valid loop again (lazy deletion)
 	}
 	return false;
 }
