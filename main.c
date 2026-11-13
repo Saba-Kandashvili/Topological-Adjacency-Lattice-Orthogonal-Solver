@@ -60,7 +60,7 @@ int main(int argc, char **argv)
     }
 
     // 2. Configuration
-    uint32_t width = 100;
+    uint32_t width = 1000;
     uint32_t length = 100;
     uint32_t height = 30;
     // uint32_t seed = time(NULL);
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
     }
     else
     {
-        uint16_t ***grid = generateGrid(width, length, height, seed, fulness);
+        cgsme_tile_t ***grid = generateGrid(width, length, height, seed, fulness);
 
         if (grid)
         {

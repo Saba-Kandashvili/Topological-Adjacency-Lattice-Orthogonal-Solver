@@ -21,7 +21,6 @@
 #define MIN(a, b) ((a) < (b) ? a : b)
 #endif
 
-uint16_t ***globalGrid;
 uint32_t w, l;
 
 /// Generate a 3D grid using Wave Function Collapse (WFC).
@@ -37,7 +36,7 @@ uint32_t w, l;
 /// Returns:
 ///     Pointer to a newly-allocated 3D grid. The return value is an array of
 ///     `height` pointers to layers; each layer is an array of `length` row
-///     pointers and each row contains `width` `uint16_t` entries. The caller
+///     pointers and each row contains `width` `cgsme_tile_t` entries. The caller
 ///     owns the returned memory and must free it with `freeGrid(grid, width,
 ///     length, height)`.
 ///
@@ -48,7 +47,7 @@ uint32_t w, l;
 ///     - The function currently does not perform robust malloc error handling;
 ///       partial allocation may lead to undefined behavior if memory allocation
 ///       fails.
-uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness);
+cgsme_tile_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness);
 
 /// Free a grid previously returned by `generateGrid`.
 ///
@@ -63,7 +62,7 @@ uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint3
 ///     - Expects the same dimensions used to allocate; passing a NULL pointer
 ///       or mismatched dimensions is undefined (the function does not check
 ///       for NULL in the current implementation).
-void freeGrid(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height);
+void freeGrid(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height);
 // Helper executed on a worker thread to generate a single layer.
 // Parameters:
 //     args - pointer to a `layerGenerationArgs` struct (defined in generator.h).
@@ -73,23 +72,6 @@ void freeGrid(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height
 //     `args->seed`.
 int generateLayerThread(void *args);
 
-/// Clean reachable tiles starting from (x,y) inside a single layer.
-///
-/// Parameters:
-///     gridLayer - pointer to the layer (2D array indexed as [y][x]).
-///     width     - number of columns.
-///     length    - number of rows.
-///     x, y      - starting coordinates for the cleaning flood-fill.
-///
-/// Behavior:
-///     - Performs a recursive flood-fill over tiles reachable from (x,y) by
-///       following open connections (uses directional masks such as
-///       `North_Open_Mask`).
-///     - Marks visited tiles by inverting their bits in-place (the
-///       implementation flips bits to indicate visitation).
-///     - Performs bounds checks and stops at tiles that are already
-///       multi-state (popcount > 1) or outside the grid.
-void cleanGrid(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y);
 
 void printProgressBar(int percentage)
 {
@@ -113,15 +95,10 @@ void printProgressBar(int percentage)
 
 // EDGE FIXUP LOGIC
 
-// Internal flags for direction manipulation (N=1, E=2, S=4, W=8)
-#define DIR_N 1
-#define DIR_E 2
-#define DIR_S 4
-#define DIR_W 8
 
 // ARCHITECT LOGIC (pre-seeding)
 // runs purely on the main thread before any threads are spawned
-void runArchitect(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t fulness, uint32_t seed)
+void runArchitect(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t fulness, uint32_t seed)
 {
     CGSME_PROFILE_FUNC();
 
@@ -133,7 +110,7 @@ void runArchitect(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t he
     // generate Mask (Ridged Noise + Sanitize + Rescue)
     if (fulness < 100)
     {
-        // the generator will write All_Possible_State (65535)
+        // the generator will write All_Possible_State
         // to valid locations. everything else stays 0
         generateRidgedMask(grid, width, length, height, fulness, seed);
     }
@@ -145,51 +122,59 @@ void runArchitect(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t he
                     grid[z][y][x] = All_Possible_State;
     }
 
-    // place stairs
-    int stairsPerLayer = (width * length) / 400;
-    if (stairsPerLayer < 2)
-        stairsPerLayer = 2;
-
+    // place vertical anchors (stairs) — defined in tileset.json "architect.vertical_anchors"
+    // lower tile goes on layer z, upper tile goes on layer z + 1 at the same (x, y)
     for (uint32_t z = 0; z < height - 1; z++)
     {
-        int placedCount = 0;
-        int attempts = 0;
-        int maxAttempts = stairsPerLayer * 20;
-
-        while (placedCount < stairsPerLayer && attempts < maxAttempts)
+        for (int a = 0; a < CGSME_NUM_ANCHORS; a++)
         {
-            attempts++;
-            int x = nextRandom(&rngState) % width;
-            int y = nextRandom(&rngState) % length;
+            const cgsme_tile_t lowerTile = CGSME_BIT(CGSME_ANCHOR_LOWER[a]);
+            const cgsme_tile_t upperTile = CGSME_BIT(CGSME_ANCHOR_UPPER[a]);
 
-            // bounds
-            if (x < 1 || y < 1 || x >= width - 1 || y >= length - 1)
-                continue;
+            int anchorsPerLayer = (int)((width * length) / CGSME_ANCHOR_DIVISOR[a]);
+            if (anchorsPerLayer < (int)CGSME_ANCHOR_MIN[a])
+                anchorsPerLayer = (int)CGSME_ANCHOR_MIN[a];
 
-            // VOID CHECK must be on valid land
-            if (grid[z][y][x] == Empty_Tile)
-                continue;
+            int placedCount = 0;
+            int attempts = 0;
+            int maxAttempts = anchorsPerLayer * 20;
 
-            // occupancy
-            if (grid[z][y][x] != All_Possible_State)
-                continue;
+            while (placedCount < anchorsPerLayer && attempts < maxAttempts)
+            {
+                attempts++;
+                int x = nextRandom(&rngState) % width;
+                int y = nextRandom(&rngState) % length;
 
-            // anti-stacking
-            if (z > 0 && grid[z - 1][y][x] == Special_X_Corridor)
-                continue;
+                // bounds
+                if (x < 1 || y < 1 || x >= width - 1 || y >= length - 1)
+                    continue;
 
-            grid[z][y][x] = Special_X_Corridor;    // stairs up
-            grid[z + 1][y][x] = Normal_X_Corridor; // receiver hole
-            placedCount++;
+                // VOID CHECK must be on valid land
+                if (grid[z][y][x] == Empty_Tile)
+                    continue;
+
+                // occupancy
+                if (grid[z][y][x] != All_Possible_State)
+                    continue;
+
+                // anti-stacking
+                if (z > 0 && grid[z - 1][y][x] == lowerTile)
+                    continue;
+
+                grid[z][y][x] = lowerTile;     // stairs up
+                grid[z + 1][y][x] = upperTile; // receiver hole
+                placedCount++;
+            }
         }
     }
 }
+
 
 int generateLayerThread(void *args)
 {
     CGSME_PROFILE_FUNC();
     layerGenerationArgs *arg = (layerGenerationArgs *)args;
-    uint16_t **gridLayer = arg->gridLayer;
+    cgsme_tile_t **gridLayer = arg->gridLayer;
     uint32_t width = arg->width;
     uint32_t length = arg->length;
     int32_t startX = arg->startX;
@@ -199,27 +184,28 @@ int generateLayerThread(void *args)
 
     uint32_t rngState = seed;
 
-    // --- WEIGHTS CONFIGURATION ---
-    float current_spawnrates[NUM_TILE_TYPES];
+    // WEIGHTS CONFIGURATION
+    float current_spawnrates[CGSME_NUM_CATEGORIES];
     if (fulness < 100)
     {
-        // MASK MODE: Prioritize connectivity (L, T, I) over Dead Ends
-        current_spawnrates[0] = 0.05f; // Normal X
-        current_spawnrates[1] = 0.20f; // T
-        current_spawnrates[2] = 0.40f; // L
-        current_spawnrates[3] = 0.30f; // I
-        current_spawnrates[4] = 0.05f; // D (Very Low)
-        current_spawnrates[5] = 0.0f;  // Special X
+        // MASK MODE: fixed weights from tileset.json "mask_weight"
+        for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
+            current_spawnrates[i] = CGSME_CATEGORY_MASK_WEIGHT[i];
     }
     else
     {
-        // OCEAN MODE: Uniform start
-        for (int i = 0; i < NUM_TILE_TYPES; ++i)
-            current_spawnrates[i] = 1.0f / (float)NUM_TILE_TYPES;
+        // OCEAN MODE: uniform start over the naturally spawning categories only
+        int naturalCount = 0;
+        for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
+            if (CGSME_CATEGORY_NATURAL[i])
+                naturalCount++;
+
+        for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
+            current_spawnrates[i] = (CGSME_CATEGORY_NATURAL[i] && naturalCount > 0) ? (1.0f / (float)naturalCount) : 0.0f;
     }
 
-    // --- EXACT TARGET COUNTING ---
-    // Count exact mask size
+    // EXACT TARGET COUNTING
+    // exact mask size
     int target_collapsed_count = 0;
     for (uint32_t y = 0; y < length; y++)
     {
@@ -232,36 +218,35 @@ int generateLayerThread(void *args)
 
     int valid_collapsed_count = 0;
 
-
     MinHeap *heap = initHeap(width, length);
 
-    // 2. INIT & CONSTRAINT PROPAGATION
+    // INIT and CONSTRAINT PROPAGATION
     for (uint32_t i = 0; i < length; i++)
     {
         for (uint32_t j = 0; j < width; j++)
         {
             if (gridLayer[i][j] == Empty_Tile)
             {
-                // Mask Void: Tell neighbors "I am a wall"
+                // Mask Void: tell neighbors "I am a wall"
                 updateNeighbours(gridLayer, width, length, j, i, heap, &rngState);
             }
-            else if (__builtin_popcount(gridLayer[i][j]) == 1)
+            else if (CGSME_POPCOUNT(gridLayer[i][j]) == 1)
             {
-                // Pre-placed Stairs: Propagate constraints
+                // preplaced stairs propagate constraints
                 valid_collapsed_count++;
                 updateNeighbours(gridLayer, width, length, j, i, heap, &rngState);
             }
         }
     }
 
-    // 3. SEED CENTER (If valid)
-    if (gridLayer[startY][startX] != Empty_Tile && __builtin_popcount(gridLayer[startY][startX]) > 1)
+    // SEED CENTER (if valid)
+    if (gridLayer[startY][startX] != Empty_Tile && CGSME_POPCOUNT(gridLayer[startY][startX]) > 1)
     {
-        gridLayer[startY][startX] = Normal_X_Corridor;
+        gridLayer[startY][startX] = CGSME_SEED_TILE_MASK;
         updateNeighbours(gridLayer, width, length, startX, startY, heap, &rngState);
         valid_collapsed_count++;
 
-        // Add neighbors to heap to kickstart
+        // add neighbors to heap to kickstart
         if (startY > 0)
             heapInsertOrUpdate(heap, gridLayer, startX, startY - 1, &rngState);
         if (startY < length - 1)
@@ -272,16 +257,16 @@ int generateLayerThread(void *args)
             heapInsertOrUpdate(heap, gridLayer, startX + 1, startY, &rngState);
     }
 
-    // High safety limit for complex masks
+    // high safety limit for complex masks
     int max_iter = width * length * 50;
     int iter = 0;
 
-    // 4. MAIN LOOP
+    // MAIN LOOP
     while (valid_collapsed_count < target_collapsed_count && iter < max_iter)
     {
         iter++;
 
-        // Only use dynamic pacing if NOT in mask mode
+        // only use dynamic pacing if NOT in mask mode
         if (fulness >= 100 && (iter % 10 == 0 || valid_collapsed_count < 50))
         {
             update_spawnrates(current_spawnrates, valid_collapsed_count, target_collapsed_count);
@@ -292,16 +277,16 @@ int generateLayerThread(void *args)
 
         if (!found)
         {
-            // HEAP EMPTY: Reseed using AGGRESSIVE finder
-            // This will pick any tile inside the mask that isn't solved yet
+            // HEAP EMPTY: reseed using AGGRESSIVE finder
+            // this will pick any tile inside the mask that isnt solved yet
             if (findBestSeedLocation(gridLayer, width, length, &cx, &cy, &rngState))
             {
                 found = true;
 
-                // Force seed a tile type (Normal X is flexible)
-                if (__builtin_popcount(gridLayer[cy][cx]) > 1)
+                // force seed a tile type (seed tile from tileset.json is flexible)
+                if (CGSME_POPCOUNT(gridLayer[cy][cx]) > 1)
                 {
-                    gridLayer[cy][cx] = Normal_X_Corridor;
+                    gridLayer[cy][cx] = CGSME_SEED_TILE_MASK;
                     updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
                     valid_collapsed_count++;
 
@@ -315,59 +300,59 @@ int generateLayerThread(void *args)
                     if (cx < width - 1)
                         heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, &rngState);
 
-                    continue; // Skip the collapse step for this iteration
+                    continue; // skip the collapse step for this iteration
                 }
             }
             else
             {
-                // Truly no more tiles left to fill
+                // no more tiles left to fill
                 break;
             }
         }
 
-        // Collapse
-        if (__builtin_popcount(gridLayer[cy][cx]) > 1)
+        // collapse
+        if (CGSME_POPCOUNT(gridLayer[cy][cx]) > 1)
         {
             collapseTile(&gridLayer[cy][cx], current_spawnrates, &rngState);
             updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
 
-            // Note: Because updateNeighbours now revives dead tiles, gridLayer will never be Empty_Tile
-            // unless it was Mask Void. It will be All_Possible if it failed.
-            if (gridLayer[cy][cx] != Empty_Tile && __builtin_popcount(gridLayer[cy][cx]) == 1)
+            // because updateNeighbours now revives dead tiles, gridLayer will never be Empty_Tile
+            // unless it was mask void. It will be All_Possible if it failed
+            if (gridLayer[cy][cx] != Empty_Tile && CGSME_POPCOUNT(gridLayer[cy][cx]) == 1)
                 valid_collapsed_count++;
         }
 
-        // Add neighbors to heap
-        // Only add if they are still uncollapsed candidates
-        if (cy > 0 && __builtin_popcount(gridLayer[cy - 1][cx]) > 1)
+        // add neighbors to heap
+        // only add if they are still uncollapsed candidates
+        if (cy > 0 && CGSME_POPCOUNT(gridLayer[cy - 1][cx]) > 1)
             heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, &rngState);
-        if (cy < length - 1 && __builtin_popcount(gridLayer[cy + 1][cx]) > 1)
+        if (cy < length - 1 && CGSME_POPCOUNT(gridLayer[cy + 1][cx]) > 1)
             heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, &rngState);
-        if (cx > 0 && __builtin_popcount(gridLayer[cy][cx - 1]) > 1)
+        if (cx > 0 && CGSME_POPCOUNT(gridLayer[cy][cx - 1]) > 1)
             heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, &rngState);
-        if (cx < width - 1 && __builtin_popcount(gridLayer[cy][cx + 1]) > 1)
+        if (cx < width - 1 && CGSME_POPCOUNT(gridLayer[cy][cx + 1]) > 1)
             heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, &rngState);
 
-        // VOID LOGIC (Only for Ocean Mode)
-        // If we hit target count in non-masked mode, start deleting unnecessary tiles
+        // VOID LOGIC (only for ocean mode)
+        // if hit target count in nonmasked mode start deleting unnecessary tiles
         if (fulness >= 100 && valid_collapsed_count >= target_collapsed_count)
         {
             if (!isTileRequired(gridLayer, width, length, cx, cy))
             {
                 gridLayer[cy][cx] = Empty_Tile;
                 updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
-                valid_collapsed_count--; // Adjust count
+                valid_collapsed_count--; // adjust count
             }
         }
     }
 
-    // 5. CLEANUP & WELDING
+    // CLEANUP & WELDING
     for (uint32_t i = 0; i < length; i++)
     {
         for (uint32_t j = 0; j < width; j++)
         {
-            // If anything is still superposition (shouldn't be), kill it
-            if (__builtin_popcount(gridLayer[i][j]) > 1)
+            // if anything is still superposition (shouldn't be), kill it
+            if (CGSME_POPCOUNT(gridLayer[i][j]) > 1)
                 gridLayer[i][j] = Empty_Tile;
         }
     }
@@ -377,20 +362,19 @@ int generateLayerThread(void *args)
     findConnectedRegionsInPlace(gridLayer, width, length);
     germanWelderInPlace(gridLayer, width, length, &rngState);
 
-    // Free memory
+    // free memory
     freeHeap(heap);
-    
 
-    // Unpack Regions
+    // unpack Regions
     for (uint32_t i = 0; i < length; i++)
     {
         for (uint32_t j = 0; j < width; j++)
         {
-            if (gridLayer[i][j] == 0xFFFF)
+            if (gridLayer[i][j] == CGSME_PACKED_VOID)
                 gridLayer[i][j] = Empty_Tile;
             else
             {
-                uint8_t index = gridLayer[i][j] & 0xF;
+                uint8_t index = (uint8_t)(gridLayer[i][j] & CGSME_TILE_INDEX_MASK);
                 gridLayer[i][j] = indexToMask(index);
             }
         }
@@ -399,13 +383,14 @@ int generateLayerThread(void *args)
     return 0;
 }
 
-uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness)
+
+cgsme_tile_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness)
 {
     CGSME_PROFILE_FUNC();
 
     // SAFETY CHECK
-    // WFC cannot mathematically operate on maps smaller than 3x3 (needs center + neighbors).
-    // German Welder needs space to exist.
+    // WFC cannot mathematically operate on maps smaller than 3x3 (needs center + neighbors)
+    // german welder needs space to exist
     if (width < 4 || length < 4 || height < 1)
     {
         return NULL; // fail instead of crashing
@@ -417,42 +402,30 @@ uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint3
     uint64_t __cgsme_grid_start_cycles = cgsme_now_cycles();
 #endif
 
-    // uint16_t ***grid = malloc(sizeof(uint16_t **) * height);
-
-    // for (int32_t i = 0; i < height; i++)
-    // {
-    //     // USE CALLOC
-    //     // ensures the grid is 00000000.
-    //     // can check "if grid[i][j] == 0" later
-    //     grid[i] = calloc(length, sizeof(uint16_t *));
-    //     for (int j = 0; j < length; j++)
-    //         grid[i][j] = calloc(width, sizeof(uint16_t));
-    // }
-
     // top level pointer
-    uint16_t ***grid = malloc(sizeof(uint16_t **) * height);
+    cgsme_tile_t ***grid = malloc(sizeof(cgsme_tile_t **) * height);
 
     // mid level pointer
-    uint16_t **all_rows = malloc(height * length * sizeof(uint16_t *));
+    cgsme_tile_t **all_rows = malloc(height * length * sizeof(cgsme_tile_t *));
 
     // actual data all at once (all 0s)
-    uint16_t *all_data = calloc(height * length * width, sizeof(uint16_t));
+    cgsme_tile_t *all_data = calloc(height * length * width, sizeof(cgsme_tile_t));
 
     // stich so it can be indexed as grid[layer][row][col]
     for (uint32_t i = 0; i < height; i++)
     {
-        grid[i] = &all_rows[i*length]; // point to the start of this layer
+        grid[i] = &all_rows[i * length]; // point to the start of this layer
         for (uint32_t j = 0; j < length; j++)
         {
             // point to the start of this row
-            grid[i][j] = &all_data[(i*length + j)*width];
+            grid[i][j] = &all_data[(i * length + j) * width];
         }
     }
 
     // ARCHITECT PHASE
     runArchitect(grid, width, length, height, fulness, seed);
 
-    // LAYER GENERATION PHASE (MULTI-THREADING)
+    // LAYER GENERATION PHASE (MULTI THREADING)
     thrd_t *threads = malloc(sizeof(thrd_t) * height);
     layerGenerationArgs *args = malloc(sizeof(layerGenerationArgs) * height);
 
@@ -474,7 +447,7 @@ uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint3
         args[i].endX = centerX;
         args[i].endY = centerY;
 
-        args[i].seed = nextRandom(&seed); // Use deterministic derivative seeds
+        args[i].seed = nextRandom(&seed);
         args[i].fulness = fulness;
         args[i].layerIndex = i;
 
@@ -498,7 +471,8 @@ uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint3
     return grid;
 }
 
-void freeGrid(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height)
+
+void freeGrid(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height)
 {
     CGSME_PROFILE_FUNC();
     if (grid != NULL)
@@ -507,58 +481,11 @@ void freeGrid(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height
         if (grid[0] != NULL)
         {
             // grid[0][0] contains the pointer to all_data
-            free((void *)grid[0][0]); 
+            free((void *)grid[0][0]);
         }
-        
+
         free((void *)grid[0]); // free all_rows
         free((void *)grid);    // free the top level grid pointer
     }
 }
 
-void cleanGrid(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
-{
-    CGSME_PROFILE_FUNC();
-
-    // recursive algorithm where we flip all the bits to mark it as visited
-
-    // base case if we leave the grid
-    //  __builtin_popcount(gridLayer[y][x]) > 1
-    //  all the already collapsed 16 corridors can be 0 1 10 100 1000 10000 and so on...
-    //  so if the popcount is more than 1 it means its not collapsed yet, skip that (should not happen but just in case)
-    if (x >= width || x < 0 || y >= length || y < 0 || __builtin_popcount((unsigned)gridLayer[y][x]) > 1)
-        return;
-
-    uint16_t tmp = gridLayer[y][x];
-    gridLayer[y][x] = ~gridLayer[y][x];
-
-    // if the direction is open then we recursively keep going else return
-    if (tmp & Tiles_Opening_North)
-        cleanGrid(gridLayer, width, length, x, y - 1);
-    if (tmp & Tiles_Opening_South)
-        cleanGrid(gridLayer, width, length, x, y + 1);
-    if (tmp & Tiles_Opening_East)
-        cleanGrid(gridLayer, width, length, x + 1, y);
-    if (tmp & Tiles_Opening_West)
-        cleanGrid(gridLayer, width, length, x - 1, y);
-}
-
-void updateTileEntropy(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
-{
-    CGSME_PROFILE_FUNC();
-
-    uint16_t northMask = All_Possible_State;
-    uint16_t eastMask = All_Possible_State;
-    uint16_t southMask = All_Possible_State;
-    uint16_t westMask = All_Possible_State;
-
-    if (y != 0 && __builtin_popcount(gridLayer[y - 1][x]) == 1)
-        northMask = South_Open_Mask;
-    if (y != length - 1 && __builtin_popcount(gridLayer[y + 1][x]) == 1)
-        southMask = North_Open_Mask;
-    if (x != 0 && __builtin_popcount(gridLayer[y][x - 1]) == 1)
-        westMask = East_Open_Mask;
-    if (x != width - 1 && __builtin_popcount(gridLayer[y][x + 1]) == 1)
-        eastMask = West_Open_Mask;
-
-    gridLayer[y][x] &= northMask & southMask & eastMask & westMask;
-}

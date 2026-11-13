@@ -31,20 +31,6 @@
 #define DIR_OPPOSITE(d) (((d) + 2) & 3)
 #endif
 
-// LEGACY ALIASES  only cgsme_topology.c still uses these
-
-// bit flags used by getTileFlags / getTileFromFlags (N=1, E=2, S=4, W=8)
-#define DIR_N 1
-#define DIR_E 2
-#define DIR_S 4
-#define DIR_W 8
-
-// self-port masks: does THIS tile have an opening toward D?
-#define Tiles_Opening_North (CGSME_HAS_PORT_MASK[DIR_IDX_N])
-#define Tiles_Opening_East  (CGSME_HAS_PORT_MASK[DIR_IDX_E])
-#define Tiles_Opening_South (CGSME_HAS_PORT_MASK[DIR_IDX_S])
-#define Tiles_Opening_West  (CGSME_HAS_PORT_MASK[DIR_IDX_W])
-
 // mask -> index (position of the single set bit)
 static inline uint8_t maskToIndex(cgsme_tile_t mask)
 {
