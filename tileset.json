@@ -1,0 +1,44 @@
+{
+  "name": "standard_corridors_v1",
+  "dimensions": 3,
+  "sockets": {
+    "WALL":   { "open": false, "compatible": ["WALL"] },
+    "OPEN":   { "open": true,  "compatible": ["OPEN"] }
+  },
+  "categories": [
+    { "name": "X",         "curve_pos": 0.0, "mask_weight": 0.05, "connector_boost": false, "natural_spawn": true },
+    { "name": "T",         "curve_pos": 1.0, "mask_weight": 0.20, "connector_boost": false, "natural_spawn": true },
+    { "name": "L",         "curve_pos": 2.0, "mask_weight": 0.40, "connector_boost": true,  "natural_spawn": true },
+    { "name": "I",         "curve_pos": 3.0, "mask_weight": 0.30, "connector_boost": true,  "natural_spawn": true },
+    { "name": "D",         "curve_pos": 4.0, "mask_weight": 0.05, "connector_boost": false, "natural_spawn": true },
+    { "name": "SPECIAL_X", "curve_pos": 0.0, "mask_weight": 0.00, "connector_boost": false, "natural_spawn": false }
+  ],
+  "gaussian_config": {
+    "gauss_width": 2.0,
+    "connector_boost": 2.5
+  },
+  "architect": {
+    "seed_tile": "Normal_X_Corridor",
+    "vertical_anchors": [
+      { "lower": "Special_X_Corridor", "upper": "Normal_X_Corridor", "density_divisor": 400, "min_per_layer": 2 }
+    ]
+  },
+  "tiles": [
+    { "id": 0,  "name": "North_East_Corridor",  "category": "L", "ports": { "N": "OPEN", "E": "OPEN", "S": "WALL", "W": "WALL" } },
+    { "id": 1,  "name": "South_East_Corridor",  "category": "L", "ports": { "N": "WALL", "E": "OPEN", "S": "OPEN", "W": "WALL" } },
+    { "id": 2,  "name": "South_West_Corridor",  "category": "L", "ports": { "N": "WALL", "E": "WALL", "S": "OPEN", "W": "OPEN" } },
+    { "id": 3,  "name": "North_West_Corridor",  "category": "L", "ports": { "N": "OPEN", "E": "WALL", "S": "WALL", "W": "OPEN" } },
+    { "id": 4,  "name": "North_South_Corridor", "category": "I", "ports": { "N": "OPEN", "E": "WALL", "S": "OPEN", "W": "WALL" } },
+    { "id": 5,  "name": "West_East_Corridor",   "category": "I", "ports": { "N": "WALL", "E": "OPEN", "S": "WALL", "W": "OPEN" } },
+    { "id": 6,  "name": "North_T_Corridor",     "category": "T", "ports": { "N": "OPEN", "E": "OPEN", "S": "WALL", "W": "OPEN" } },
+    { "id": 7,  "name": "East_T_Corridor",      "category": "T", "ports": { "N": "OPEN", "E": "OPEN", "S": "OPEN", "W": "WALL" } },
+    { "id": 8,  "name": "South_T_Corridor",     "category": "T", "ports": { "N": "WALL", "E": "OPEN", "S": "OPEN", "W": "OPEN" } },
+    { "id": 9,  "name": "West_T_Corridor",      "category": "T", "ports": { "N": "OPEN", "E": "WALL", "S": "OPEN", "W": "OPEN" } },
+    { "id": 10, "name": "Normal_X_Corridor",    "category": "X", "ports": { "N": "OPEN", "E": "OPEN", "S": "OPEN", "W": "OPEN" }, "weld_target": true },
+    { "id": 11, "name": "Special_X_Corridor",   "category": "SPECIAL_X", "ports": { "N": "OPEN", "E": "OPEN", "S": "OPEN", "W": "OPEN" }, "weld_target": false },
+    { "id": 12, "name": "North_DeadEnd",        "category": "D", "ports": { "N": "OPEN", "E": "WALL", "S": "WALL", "W": "WALL" } },
+    { "id": 13, "name": "East_DeadEnd",         "category": "D", "ports": { "N": "WALL", "E": "OPEN", "S": "WALL", "W": "WALL" } },
+    { "id": 14, "name": "South_DeadEnd",        "category": "D", "ports": { "N": "WALL", "E": "WALL", "S": "OPEN", "W": "WALL" } },
+    { "id": 15, "name": "West_DeadEnd",         "category": "D", "ports": { "N": "WALL", "E": "WALL", "S": "WALL", "W": "OPEN" } }
+  ]
+}
