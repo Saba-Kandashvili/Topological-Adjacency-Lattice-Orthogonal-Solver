@@ -2,8 +2,18 @@
 REM Ensure script runs from its own directory so relative paths resolve
 pushd %~dp0
 
+set "TILESET_FILE=%CGSME_TILESET%"
+set "GEN_ARGS=%*"
+if not "%~1"=="" (
+    if /I "%~x1"==".json" (
+        set "TILESET_FILE=%~1"
+        for /f "tokens=1*" %%A in ("%*") do set "GEN_ARGS=%%B"
+    )
+)
+if "%TILESET_FILE%"=="" set "TILESET_FILE=tileset.json"
+
 echo ---------------------------------------------------
-echo 0. Baking tileset.json -^> cgsme_tileset_baked.h...
+echo 0. Baking %TILESET_FILE% -^> cgsme_tileset_baked.h...
 echo ---------------------------------------------------
 gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe
 if %ERRORLEVEL% NEQ 0 (
@@ -11,14 +21,13 @@ if %ERRORLEVEL% NEQ 0 (
     pause
     exit /b
 )
-cgsme_codegen.exe tileset.json cgsme_tileset_baked.h
+cgsme_codegen.exe "%TILESET_FILE%" cgsme_tileset_baked.h
 if %ERRORLEVEL% NEQ 0 (
     echo Tileset baking failed!
     pause
     exit /b
 )
 echo.
-
 
 echo ---------------------------------------------------
 echo 1. Compiling C Code...
@@ -39,13 +48,14 @@ echo ---------------------------------------------------
 echo 2. Running Generator...
 echo ---------------------------------------------------
 
-debug_gen.exe --cgsme-debug
+debug_gen.exe --cgsme-debug %GEN_ARGS%
 
 echo.
 echo ---------------------------------------------------
 echo 3. Launching Visualizer...
 echo ---------------------------------------------------
 
+set "CGSME_TILESET=%TILESET_FILE%"
 love .
 
 echo Done.

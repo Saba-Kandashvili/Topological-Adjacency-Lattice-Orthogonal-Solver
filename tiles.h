@@ -17,7 +17,11 @@
 
 	DO NOT edit cgsme_tileset_baked.h by hand, edit tileset.json and re-run cgsme_codegen
 */
+#ifdef CGSME_USE_CMAKE_BAKED
+#include <cgsme_tileset_baked.h>
+#else
 #include "cgsme_tileset_baked.h"
+#endif
 
 // standardized direction indices used to index every LUT (0=N, 1=E, 2=S, 3=W)
 #ifndef DIR_IDX_N
