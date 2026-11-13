@@ -51,7 +51,7 @@ float getValueNoise(float x, float y, uint32_t seed)
 }
 
 // BFS to count the size of a region (non-recursive to avoid stack issues)
-int measureRegionSize(uint16_t ***grid, bool *visited, int width, int length, int startX, int startY)
+int measureRegionSize(cgsme_tile_t ***grid, bool *visited, int width, int length, int startX, int startY)
 {
     int count = 0;
     int head = 0;
@@ -96,7 +96,7 @@ int measureRegionSize(uint16_t ***grid, bool *visited, int width, int length, in
 }
 
 // BFS to mark the main area adn delete everythign else
-void keepOnlyLargestMask(uint16_t ***grid, int width, int length, int height, int startX, int startY)
+void keepOnlyLargestMask(cgsme_tile_t ***grid, int width, int length, int height, int startX, int startY)
 {
     bool *isMain = calloc(width * length, sizeof(bool));
     if (!isMain)
@@ -152,7 +152,7 @@ void keepOnlyLargestMask(uint16_t ***grid, int width, int length, int height, in
 }
 
 // grow the edges of the mask by 1 pixel (dilation)
-int dilateMask(uint16_t ***grid, int width, int length, int height, int maxToAdd)
+int dilateMask(cgsme_tile_t ***grid, int width, int length, int height, int maxToAdd)
 {
     int added = 0;
     bool *toAdd = calloc(width * length, sizeof(bool));
@@ -202,7 +202,7 @@ done:
 }
 
 // RIDGED NOISE MASK GENERATION
-void generateRidgedMask(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t targetFullness, uint32_t seed)
+void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t targetFullness, uint32_t seed)
 {
     CGSME_PROFILE_FUNC();
     printf("Generating Ridged Noise Mask (Fullness: %u%%)...\n", targetFullness);
@@ -390,7 +390,7 @@ void saveNoiseDebug(float *noiseMap, uint32_t width, uint32_t length)
 }
 
 // Dumps the binary mask state to disk (0 = Void, 1 = Valid)
-void saveBinaryMaskDebug(uint16_t ***grid, uint32_t width, uint32_t length)
+void saveBinaryMaskDebug(cgsme_tile_t ***grid, uint32_t width, uint32_t length)
 {
     FILE *f = fopen("debug_mask.txt", "w");
     if (!f)

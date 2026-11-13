@@ -4,298 +4,138 @@
 #include <math.h>
 
 // returns true if any collapsed neighbor has an open connection pointing to this tile
-bool isTileRequired(uint16_t **grid, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
+bool isTileRequired(cgsme_tile_t **grid, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
 {
 	CGSME_PROFILE_FUNC();
 	// check NORTH neighbor (y-1). Does it open SOUTH toward us?
-	if (y > 0 && __builtin_popcount(grid[y - 1][x]) == 1)
+	if (y > 0 && CGSME_POPCOUNT(grid[y - 1][x]) == 1)
 	{
-		if (grid[y - 1][x] & Tiles_Opening_South)
+		if (grid[y - 1][x] & CGSME_HAS_PORT_MASK[DIR_IDX_S])
 			return true;
 	}
 
 	// check SOUTH neighbor (y+1). Does it open NORTH toward us?
-	if (y < length - 1 && __builtin_popcount(grid[y + 1][x]) == 1)
+	if (y < length - 1 && CGSME_POPCOUNT(grid[y + 1][x]) == 1)
 	{
-		if (grid[y + 1][x] & Tiles_Opening_North)
+		if (grid[y + 1][x] & CGSME_HAS_PORT_MASK[DIR_IDX_N])
 			return true;
 	}
 
 	// check EAST neighbor (x+1). Does it open WEST toward us?
-	if (x < width - 1 && __builtin_popcount(grid[y][x + 1]) == 1)
+	if (x < width - 1 && CGSME_POPCOUNT(grid[y][x + 1]) == 1)
 	{
-		if (grid[y][x + 1] & Tiles_Opening_West)
+		if (grid[y][x + 1] & CGSME_HAS_PORT_MASK[DIR_IDX_W])
 			return true;
 	}
 
 	// check WEST neighbor (x-1). Does it open EAST toward us?
-	if (x > 0 && __builtin_popcount(grid[y][x - 1]) == 1)
+	if (x > 0 && CGSME_POPCOUNT(grid[y][x - 1]) == 1)
 	{
-		if (grid[y][x - 1] & Tiles_Opening_East)
+		if (grid[y][x - 1] & CGSME_HAS_PORT_MASK[DIR_IDX_E])
 			return true;
 	}
 
 	return false;
 }
 
-// new version oc collapseTile with spawnrates (smooth gaussian model that changes over time)
-void collapseTile(uint16_t *tile, float *rates, uint32_t *rng)
+// picks ONE set bit out of `options`, weighted by the category rates
+// iterates only over set bits: t &= (t - 1) clears the lowest set bit each step,
+// CGSME_CTZ(t) gives the index of the current lowest set bit
+static cgsme_tile_t pickWeightedTile(cgsme_tile_t options, const float *rates, uint32_t *rng)
+{
+	// 1. total weight of the valid options only
+	float total_weight = 0.0f;
+	for (cgsme_tile_t t = options; t != 0; t &= (t - 1))
+		total_weight += rates[CGSME_BIT_TO_CATEGORY[CGSME_CTZ(t)]];
+
+	// EDGE CASE: all valid options have ~0 weight -> uniform random among set bits
+	if (total_weight <= 0.0001f)
+	{
+		uint32_t r = nextRandom(rng) % (uint32_t)CGSME_POPCOUNT(options);
+		cgsme_tile_t t = options;
+		for (uint32_t k = 0; k < r; k++)
+			t &= (t - 1); // drop the r lowest set bits
+		return CGSME_BIT(CGSME_CTZ(t));
+	}
+
+	// 2. pick a random value within the total weight range (2^32 = 4294967296)
+	float random_01 = (float)nextRandom(rng) / 4294967296.0f;
+	float random_val = random_01 * total_weight;
+
+	// 3. find the winner
+	for (cgsme_tile_t t = options; t != 0; t &= (t - 1))
+	{
+		int i = CGSME_CTZ(t);
+		random_val -= rates[CGSME_BIT_TO_CATEGORY[i]];
+		if (random_val <= 0)
+			return CGSME_BIT(i);
+	}
+
+	// fallback: float rounding finished the loop without a pick -> take the highest set bit
+	cgsme_tile_t last = options;
+	while (last & (last - 1))
+		last &= (last - 1);
+	return last;
+}
+
+// collapseTile with spawnrates (smooth gaussian model that changes over time)
+void collapseTile(cgsme_tile_t *tile, float *rates, uint32_t *rng)
 {
 #ifdef cgsme_DEBUG
 	uint64_t __cgsme_collapse_start = cgsme_now_us();
 	uint64_t __cgsme_collapse_start_cycles = cgsme_now_cycles();
 #endif
-	if (*tile == 0)
+	if (*tile == Empty_Tile)
 		return;
 
-	// 1. Calculate Total Weight of VALID options only
-	float total_weight = 0.0f;
-	int valid_options_count = 0;
+	*tile = pickWeightedTile(*tile, rates, rng);
 
-	for (int i = 0; i < 16; i++)
+#ifdef cgsme_DEBUG
+	if (cgsme_get_enabled())
 	{
-		// Check if the i-th bit is set (is this tile valid?)
-		if ((*tile >> i) & 1)
-		{
-			int category_index = BIT_TO_CATEGORY[i];
-			total_weight += rates[category_index];
-			valid_options_count++;
-		}
+		uint64_t __cgsme_collapse_end = cgsme_now_us();
+		uint64_t __cgsme_collapse_end_cycles = cgsme_now_cycles();
+		cgsme_profile_record("collapseTile", (unsigned long long)(__cgsme_collapse_end - __cgsme_collapse_start),
+							 (unsigned long long)(__cgsme_collapse_end_cycles - __cgsme_collapse_start_cycles));
 	}
-
-	// EDGE CASE: If total_weight is 0 (e.g., we want DeadEnds only, but only T-junctions
-	// are valid here), or if something went wrong, fallback to standard Uniform Random.
-	if (total_weight <= 0.0001f || valid_options_count == 0)
-	{
-		// OLD LOGIC FALLBACK
-		uint32_t pop_count = __builtin_popcount(*tile);
-		if (pop_count == 0)
-		{
-#ifdef cgsme_DEBUG
-			if (cgsme_get_enabled())
-			{
-				uint64_t __cgsme_collapse_end = cgsme_now_us();
-				uint64_t __cgsme_collapse_end_cycles = cgsme_now_cycles();
-				cgsme_profile_record("collapseTile", (unsigned long long)(__cgsme_collapse_end - __cgsme_collapse_start),
-									 (unsigned long long)(__cgsme_collapse_end_cycles - __cgsme_collapse_start_cycles));
-			}
 #endif
-			return;
-		}
-		uint32_t r = nextRandom(rng) % pop_count;
-		uint32_t set_bits_found = 0;
-		for (int i = 0; i < 16; i++)
-		{
-			if ((*tile >> i) & 1)
-			{
-				if (set_bits_found == r)
-				{
-					*tile = (1U << i);
-#ifdef cgsme_DEBUG
-					if (cgsme_get_enabled())
-					{
-						uint64_t __cgsme_collapse_end = cgsme_now_us();
-						uint64_t __cgsme_collapse_end_cycles = cgsme_now_cycles();
-						cgsme_profile_record("collapseTile", (unsigned long long)(__cgsme_collapse_end - __cgsme_collapse_start),
-											 (unsigned long long)(__cgsme_collapse_end_cycles - __cgsme_collapse_start_cycles));
-					}
-#endif
-					return;
-				}
-				set_bits_found++;
-			}
-		}
-		do
-		{
-#ifdef cgsme_DEBUG
-			if (cgsme_get_enabled())
-			{
-				uint64_t __cgsme_collapse_end = cgsme_now_us();
-				uint64_t __cgsme_collapse_end_cycles = cgsme_now_cycles();
-				cgsme_profile_record("collapseTile", (unsigned long long)(__cgsme_collapse_end - __cgsme_collapse_start),
-									 (unsigned long long)(__cgsme_collapse_end_cycles - __cgsme_collapse_start_cycles));
-			}
-#endif
-		} while (0);
-		return;
-	}
-
-	// 2. Pick a random value within the total weight range
-	// threadRandom returns uint32. Divide by max to get 0.0-1.0 float.
-	// 4294967296.0 is 2^32.
-	float random_01 = (float)nextRandom(rng) / 4294967296.0f;
-	float random_val = random_01 * total_weight;
-
-	// 3. find the winner
-	for (int i = 0; i < 16; i++)
-	{
-		if ((*tile >> i) & 1)
-		{
-			int category_index = BIT_TO_CATEGORY[i];
-
-			// subtract the weight of this option
-			random_val -= rates[category_index];
-
-			// dropped below zero, this is the one that should be picked
-			if (random_val <= 0)
-			{
-				*tile = (1U << i);
-#ifdef cgsme_DEBUG
-				if (cgsme_get_enabled())
-				{
-					uint64_t __cgsme_collapse_end = cgsme_now_us();
-					uint64_t __cgsme_collapse_end_cycles = cgsme_now_cycles();
-					cgsme_profile_record("collapseTile", (unsigned long long)(__cgsme_collapse_end - __cgsme_collapse_start),
-										 (unsigned long long)(__cgsme_collapse_end_cycles - __cgsme_collapse_start_cycles));
-				}
-#endif
-				return;
-			}
-		}
-	}
-
-	// Fallback: Rounding errors might make the loop finish without picking.
-	// Just pick the last valid bit we found.
-	for (int i = 15; i >= 0; i--)
-	{
-		if ((*tile >> i) & 1)
-		{
-			*tile = (1U << i);
-#ifdef cgsme_DEBUG
-			if (cgsme_get_enabled())
-			{
-				uint64_t __cgsme_collapse_end = cgsme_now_us();
-				cgsme_log("collapseTile() fallback-last-bit(%d) elapsed=%llu us", i, (unsigned long long)(__cgsme_collapse_end - __cgsme_collapse_start));
-			}
-#endif
-			return;
-		}
-	}
 }
 
-void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y, MinHeap *heap, uint32_t *rng)
+void updateNeighbours(cgsme_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y, MinHeap *heap, uint32_t *rng)
 {
 #ifdef cgsme_DEBUG
 	uint64_t __cgsme_neigh_start = cgsme_now_us();
 	uint64_t __cgsme_neigh_start_cycles = cgsme_now_cycles();
 #endif
 
-	uint16_t northMask, eastMask, southMask, westMask;
+	cgsme_tile_t cell = gridLayer[y][x];
+	cgsme_tile_t northMask, eastMask, southMask, westMask;
 
-	switch (gridLayer[y][x])
+	if (cell == Empty_Tile || CGSME_POPCOUNT(cell) == 1)
 	{
-	case Empty_Tile:
-		northMask = North_Closed_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case Normal_X_Corridor:
-	case Special_X_Corridor:
-		northMask = North_Open_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Open_Mask;
-		break;
-	case North_East_Corridor:
-		northMask = North_Open_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case South_East_Corridor:
-		northMask = North_Closed_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case South_West_Corridor:
-		northMask = North_Closed_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Open_Mask;
-		break;
-	case North_West_Corridor:
-		northMask = North_Open_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Open_Mask;
-		break;
-	case North_South_Corridor:
-		northMask = North_Open_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case West_East_Corridor:
-		northMask = North_Closed_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Open_Mask;
-		break;
-	case North_T_Corridor:
-		northMask = North_Open_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Open_Mask;
-		break;
-	case East_T_Corridor:
-		northMask = North_Open_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case South_T_Corridor:
-		northMask = North_Closed_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Open_Mask;
-		break;
-	case West_T_Corridor:
-		northMask = North_Open_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Open_Mask;
-		break;
-	case North_DeadEnd:
-		northMask = North_Open_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case East_DeadEnd:
-		northMask = North_Closed_Mask;
-		eastMask = East_Open_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case South_DeadEnd:
-		northMask = North_Closed_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Open_Mask;
-		westMask = West_Closed_Mask;
-		break;
-	case West_DeadEnd:
-		northMask = North_Closed_Mask;
-		eastMask = East_Closed_Mask;
-		southMask = South_Closed_Mask;
-		westMask = West_Open_Mask;
-		break;
-	default:
-		northMask = (uint16_t)-1;
-		eastMask = (uint16_t)-1;
-		southMask = (uint16_t)-1;
-		westMask = (uint16_t)-1;
-		break;
+		// row CGSME_NUM_TILES of CGSME_PROP_MASK is the Empty_Tile (void) row
+		uint32_t lut = (cell == Empty_Tile) ? CGSME_NUM_TILES : (uint32_t)CGSME_CTZ(cell);
+		northMask = CGSME_PROP_MASK[lut][DIR_IDX_N];
+		eastMask = CGSME_PROP_MASK[lut][DIR_IDX_E];
+		southMask = CGSME_PROP_MASK[lut][DIR_IDX_S];
+		westMask = CGSME_PROP_MASK[lut][DIR_IDX_W];
+	}
+	else
+	{
+		// still a superposition -> no restriction
+		northMask = All_Possible_State;
+		eastMask = All_Possible_State;
+		southMask = All_Possible_State;
+		westMask = All_Possible_State;
 	}
 
 	// apply masks & check changes
 	// ONLY access Heap if heap != NULL (allows to use this function in cleanup phases too)
 
 	// WEST (x-1)
-	if ((int32_t)x - 1 >= 0 && __builtin_popcount(gridLayer[y][x - 1]) > 1)
+	if ((int32_t)x - 1 >= 0 && CGSME_POPCOUNT(gridLayer[y][x - 1]) > 1)
 	{
-		uint16_t oldVal = gridLayer[y][x - 1];
+		cgsme_tile_t oldVal = gridLayer[y][x - 1];
 		gridLayer[y][x - 1] &= westMask;
 
 		// REVIVAL CHECK: If it became 0, it was a contradiction. Reset it.
@@ -303,54 +143,46 @@ void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uin
 			gridLayer[y][x - 1] = All_Possible_State;
 
 		if (heap && gridLayer[y][x - 1] != oldVal)
-		{
 			heapInsertOrUpdate(heap, gridLayer, x - 1, y, rng);
-		}
 	}
 
 	// EAST (x+1)
-	if ((int32_t)x + 1 < width && __builtin_popcount(gridLayer[y][x + 1]) > 1)
+	if ((int32_t)x + 1 < width && CGSME_POPCOUNT(gridLayer[y][x + 1]) > 1)
 	{
-		uint16_t oldVal = gridLayer[y][x + 1];
+		cgsme_tile_t oldVal = gridLayer[y][x + 1];
 		gridLayer[y][x + 1] &= eastMask;
 
 		if (gridLayer[y][x + 1] == 0)
 			gridLayer[y][x + 1] = All_Possible_State;
 
 		if (heap && gridLayer[y][x + 1] != oldVal)
-		{
 			heapInsertOrUpdate(heap, gridLayer, x + 1, y, rng);
-		}
 	}
 
 	// NORTH (y-1)
-	if ((int32_t)y - 1 >= 0 && __builtin_popcount(gridLayer[y - 1][x]) > 1)
+	if ((int32_t)y - 1 >= 0 && CGSME_POPCOUNT(gridLayer[y - 1][x]) > 1)
 	{
-		uint16_t oldVal = gridLayer[y - 1][x];
+		cgsme_tile_t oldVal = gridLayer[y - 1][x];
 		gridLayer[y - 1][x] &= northMask;
 
 		if (gridLayer[y - 1][x] == 0)
 			gridLayer[y - 1][x] = All_Possible_State;
 
 		if (heap && gridLayer[y - 1][x] != oldVal)
-		{
 			heapInsertOrUpdate(heap, gridLayer, x, y - 1, rng);
-		}
 	}
 
 	// SOUTH (y+1)
-	if ((int32_t)y + 1 < length && __builtin_popcount(gridLayer[y + 1][x]) > 1)
+	if ((int32_t)y + 1 < length && CGSME_POPCOUNT(gridLayer[y + 1][x]) > 1)
 	{
-		uint16_t oldVal = gridLayer[y + 1][x];
+		cgsme_tile_t oldVal = gridLayer[y + 1][x];
 		gridLayer[y + 1][x] &= southMask;
 
 		if (gridLayer[y + 1][x] == 0)
 			gridLayer[y + 1][x] = All_Possible_State;
 
 		if (heap && gridLayer[y + 1][x] != oldVal)
-		{
 			heapInsertOrUpdate(heap, gridLayer, x, y + 1, rng);
-		}
 	}
 
 #ifdef cgsme_DEBUG
@@ -365,10 +197,10 @@ void updateNeighbours(uint16_t **gridLayer, uint32_t width, uint32_t length, uin
 }
 
 // scoring logic extracted to a helper
-float calculateScore(uint16_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
+float calculateScore(cgsme_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
 {
 	CGSME_PROFILE_FUNC();
-	uint32_t bitNum = __builtin_popcount(grid[y][x]);
+	uint32_t bitNum = CGSME_POPCOUNT(grid[y][x]);
 
 	// entropy only        lower entropy = higher priority
 	float score = (float)bitNum;
@@ -378,8 +210,20 @@ float calculateScore(uint16_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
 	return score + noise;
 }
 
-// finds the best spot to start a new island (closest unvisited tile to center)
-bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, uint32_t *outX, uint32_t *outY, uint32_t *rng)
+// constrain a reset cell using ONE neighbor
+// dirFromNeighbor = direction from the neighbor toward us
+//   e.g. our North neighbor sees us on ITS South side -> DIR_IDX_S
+static inline void constrainFromNeighbor(cgsme_tile_t *cell, cgsme_tile_t neighbor, uint8_t dirFromNeighbor)
+{
+	if (neighbor == Empty_Tile)
+		*cell &= CGSME_PROP_MASK[CGSME_NUM_TILES][dirFromNeighbor]; // void neighbor -> we must be closed toward it
+	else if (CGSME_POPCOUNT(neighbor) == 1)
+		*cell &= CGSME_PROP_MASK[CGSME_CTZ(neighbor)][dirFromNeighbor];
+	// uncollapsed neighbor -> no constraint
+}
+
+// finds the best spot to start a new island
+bool findBestSeedLocation(cgsme_tile_t **grid, uint32_t width, uint32_t length, uint32_t *outX, uint32_t *outY, uint32_t *rng)
 {
 	CGSME_PROFILE_FUNC();
 	float minScore = 1e9;
@@ -389,13 +233,13 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, uint
 	{
 		for (uint32_t j = 0; j < width; j++)
 		{
-			uint16_t tile = grid[i][j];
+			cgsme_tile_t tile = grid[i][j];
 
 			// Skip Empty (void) tiles
 			if (tile == Empty_Tile)
 				continue;
 
-			int popcount = __builtin_popcount(tile);
+			int popcount = CGSME_POPCOUNT(tile);
 
 			// skip already collapsed
 			if (popcount == 1)
@@ -407,88 +251,21 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, uint
 			{
 				grid[i][j] = All_Possible_State;
 
-				// apply constraints from all collapsed neighbors
-				// same logic as updateNeighbours but in reverse
-
-				// Check North neighbor (y-1, which is i-1)
 				if (i > 0)
-				{
-					uint16_t neighbor = grid[i - 1][j];
-					if (neighbor == Empty_Tile)
-					{
-						// Void neighbor to our North = we must close our North side
-						grid[i][j] &= Tiles_Closed_North;
-					}
-					else if (__builtin_popcount(neighbor) == 1)
-					{
-						// If North neighbor opens South toward us -> we must open North
-						if (neighbor & Tiles_Opening_South)
-							grid[i][j] &= Tiles_Opening_North;
-						else
-							grid[i][j] &= Tiles_Closed_North;
-					}
-				}
-
-				// Check South neighbor (y+1, which is i+1)
+					constrainFromNeighbor(&grid[i][j], grid[i - 1][j], DIR_IDX_S); // North neighbor
 				if (i < length - 1)
-				{
-					uint16_t neighbor = grid[i + 1][j];
-					if (neighbor == Empty_Tile)
-					{
-						grid[i][j] &= Tiles_Closed_South;
-					}
-					else if (__builtin_popcount(neighbor) == 1)
-					{
-						if (neighbor & Tiles_Opening_North) // South neighbor opens North toward us
-							grid[i][j] &= Tiles_Opening_South;
-						else
-							grid[i][j] &= Tiles_Closed_South;
-					}
-				}
-
-				// Check West neighbor (x-1, which is j-1)
+					constrainFromNeighbor(&grid[i][j], grid[i + 1][j], DIR_IDX_N); // South neighbor
 				if (j > 0)
-				{
-					uint16_t neighbor = grid[i][j - 1];
-					if (neighbor == Empty_Tile)
-					{
-						grid[i][j] &= Tiles_Closed_West;
-					}
-					else if (__builtin_popcount(neighbor) == 1)
-					{
-						if (neighbor & Tiles_Opening_East) // West neighbor opens East toward us
-							grid[i][j] &= Tiles_Opening_West;
-						else
-							grid[i][j] &= Tiles_Closed_West;
-					}
-				}
-
-				// Check East neighbor (x+1, which is j+1)
+					constrainFromNeighbor(&grid[i][j], grid[i][j - 1], DIR_IDX_E); // West neighbor
 				if (j < width - 1)
-				{
-					uint16_t neighbor = grid[i][j + 1];
-					if (neighbor == Empty_Tile)
-					{
-						grid[i][j] &= Tiles_Closed_East;
-					}
-					else if (__builtin_popcount(neighbor) == 1)
-					{
-						if (neighbor & Tiles_Opening_West) // East neighbor opens West toward us
-							grid[i][j] &= Tiles_Opening_East;
-						else
-							grid[i][j] &= Tiles_Closed_East;
-					}
-				}
+					constrainFromNeighbor(&grid[i][j], grid[i][j + 1], DIR_IDX_W); // East neighbor
 
 				// After applying constraints, check if still valid
-				popcount = __builtin_popcount(grid[i][j]);
+				popcount = CGSME_POPCOUNT(grid[i][j]);
 				if (popcount == 0)
 				{
-					// Still contradicted after applying constraints!
-					// This is a valid masked tile that MUST be filled.
-					// Force it to All_Possible_State and return it as a seed.
-					// The main loop will collapse it, which might create a connection issue
-					// that germanWelder will fix later.
+					// Still contradicted -> force All_Possible_State and return it as a seed.
+					// germanWelder will fix any connection issue later.
 					grid[i][j] = All_Possible_State;
 					*outX = j;
 					*outY = i;
@@ -496,8 +273,7 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, uint
 				}
 				if (popcount == 1)
 				{
-					// Auto-collapsed to a single valid tile!
-					// This is actually a GOOD candidate - return it so the main loop
+					// Auto-collapsed to a single valid tile -> return it so the main loop
 					// can call updateNeighbours and count it properly.
 					*outX = j;
 					*outY = i;
@@ -507,7 +283,6 @@ bool findBestSeedLocation(uint16_t **grid, uint32_t width, uint32_t length, uint
 
 			// Valid candidate (popcount > 1)
 			// Use only random noise for seed selection - no distance preference
-			// This ensures isolated mask regions get seeded regardless of location
 			float noise = (float)(((i * width + j) ^ nextRandom(rng)) & 0xFFFF) * 0.001f;
 
 			if (noise < minScore)
@@ -528,57 +303,49 @@ void update_spawnrates(float rates[], int current_collapsed, int target_collapse
 	CGSME_PROFILE_FUNC();
 
 	// Progress = how much of the mask is filled (0.0 to 1.0)
-	// This drives the Gaussian peak position and connector boost fade
 	float progress = (target_collapsed > 0) ? ((float)current_collapsed / (float)target_collapsed) : 0.0f;
 	if (progress > 1.0f)
 		progress = 1.0f;
 
-	// 1. Calculate Standard Gaussian Weights
-	// Peak position moves from 0 (X tiles) to 4 (D tiles) as progress increases
-	float peak_position = TILE_POSITIONS[NUM_TILE_TYPES - 1] * progress;
-	float raw_weights[NUM_TILE_TYPES];
+	// the peak slides from 0 to the furthest curve_pos of any naturally spawning category
+	// (standard tileset: X=0 ... D=4)
+	float max_pos = 0.0f;
+	for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
+	{
+		if (CGSME_CATEGORY_NATURAL[i] && CGSME_CATEGORY_CURVE_POS[i] > max_pos)
+			max_pos = CGSME_CATEGORY_CURVE_POS[i];
+	}
+
+	float peak_position = max_pos * progress;
+	float current_boost = CGSME_CONNECTOR_BOOST * (1.0f - progress); // strongest at start, fades to 0
+	float raw_weights[CGSME_NUM_CATEGORIES];
 	float total_weight = 0.0f;
 
-	for (int i = 0; i < NUM_TILE_TYPES; ++i)
+	for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
 	{
-		// category 5 (special X) is forbidden from natural spawning
-		if (i == 5)
+		// categories like Special X are forbidden from natural spawning
+		if (!CGSME_CATEGORY_NATURAL[i])
 		{
 			raw_weights[i] = 0.0f;
 			continue;
 		}
 
-		float tile_pos = TILE_POSITIONS[i];
-		float distance_sq = pow(tile_pos - peak_position, 2);
-		float exponent = -distance_sq / (2 * pow(GAUSS_WIDTH, 2));
+		// 1. standard gaussian weight
+		float diff = CGSME_CATEGORY_CURVE_POS[i] - peak_position;
+		float exponent = -(diff * diff) / (2.0f * CGSME_GAUSS_WIDTH * CGSME_GAUSS_WIDTH);
+		raw_weights[i] = expf(exponent);
 
-		raw_weights[i] = exp(exponent);
-	}
+		// 2. connector boost (L and I in the standard tileset)
+		if (CGSME_CATEGORY_BOOST[i])
+			raw_weights[i] += current_boost;
 
-	// 2. APPLY CONNECTOR BOOST
-	// boost L (Index 2) and I (Index 3).
-	// The boost is strongest at start (1.0 - progress) and fades to 0.
-	// multiply by raw_weights[0] (the X weight) or just add to it to ensure
-	// it competes with the X tile which is dominant at the start.
-
-	float current_boost = CONNECTOR_BOOST * (1.0f - progress);
-
-	// Index 2 is L, Index 3 is I.
-	// add raw value to them. Since exp() maxes at 1.0, adding 1.5 makes them very likely.
-	raw_weights[2] += current_boost;
-	raw_weights[3] += current_boost;
-
-	// 3. Normalize
-	for (int i = 0; i < NUM_TILE_TYPES; ++i)
-	{
 		total_weight += raw_weights[i];
 	}
 
+	// 3. normalize
 	if (total_weight > 0.0f)
 	{
-		for (int i = 0; i < NUM_TILE_TYPES; ++i)
-		{
+		for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
 			rates[i] = raw_weights[i] / total_weight;
-		}
 	}
 }

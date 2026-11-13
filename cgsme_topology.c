@@ -3,6 +3,14 @@
 #include "cgsme_utils.h"
 #include "threadRandom.h"
 
+
+// TEMPORARY SAFETY NET (deleted in Phase 3)
+// this file still packs a 12-bit region ID above a 4-bit tile index inside a uint16_t
+// (the >> 4, & 0xF and 0xFFFF below). That only works for tilesets with 9..16 tiles.
+// Phase 3 replaces it with the 1-bit Ariadne welder that works for every container size.
+_Static_assert(CGSME_CONTAINER_BITS == 16 && CGSME_TILE_INDEX_BITS <= 4,
+               "cgsme_topology.c still uses 12-bit region IDs: finish Phase 3 before using a tileset that is not 9..16 tiles");
+
 // welding logic using union find data structure
 // --- Union-Find Helper Functions ---
 UnionFind *createUnionFind(uint32_t size)

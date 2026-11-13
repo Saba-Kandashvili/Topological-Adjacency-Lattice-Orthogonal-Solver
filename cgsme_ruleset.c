@@ -211,7 +211,12 @@ bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
     fseek(f, 0, SEEK_SET);
     char *buf = malloc(len + 1);
     if (!buf) { fclose(f); return false; }
-    fread(buf, 1, len, f);
+    if (fread(buf, 1, (size_t)len, f) != (size_t)len)
+    {
+        free(buf);
+        fclose(f);
+        return false;
+    }
     buf[len] = '\0';
     fclose(f);
 

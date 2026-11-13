@@ -6,8 +6,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "cgsme_debug.h"
+#include "tiles.h"
 
-// --- QUEUE FOR FLOOD FILL ---
+// QUEUE FOR FLOOD FILL
 typedef struct
 {
     int32_t x, y;
@@ -90,7 +91,7 @@ void bubbleDown(MinHeap *h, uint32_t index);
 /// @param x X coordinate.
 /// @param y Y coordinate.
 /// @param rng Pointer to random state.
-void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, uint32_t *rng);
+void heapInsertOrUpdate(MinHeap *h, cgsme_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng);
 
 /// @brief Pop the minimum node from the heap.
 /// @param h Pointer to the heap.
@@ -98,6 +99,6 @@ void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, uin
 /// @param outX Output X coordinate.
 /// @param outY Output Y coordinate.
 /// @return true if a valid node was found, false if heap is empty.
-bool heapPop(MinHeap *h, uint16_t **grid, uint32_t *outX, uint32_t *outY);
+bool heapPop(MinHeap *h, cgsme_tile_t **grid, uint32_t *outX, uint32_t *outY);
 
 #endif // __cgsme_UTILS_H__
