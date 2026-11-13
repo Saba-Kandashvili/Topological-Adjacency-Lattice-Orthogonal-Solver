@@ -36,17 +36,54 @@ int main(int argc, char **argv)
     fprintf(f, "#define CGSME_VISITED_BIT     ((cgsme_tile_t)(1ULL << %u))\n", r.tile_index_bits);
     fprintf(f, "#define CGSME_PACKED_VOID     ((cgsme_tile_t)-1)\n\n");
 
-    // typesafe hardware bit intrinsics
+    // typesafe hardware bit intrinsics (with standard C11 fallback for MSVC/non-GNU compilers)
+    fprintf(f, "#if !defined(CGSME_FORCE_PORTABLE_BITOPS) && (defined(__GNUC__) || defined(__clang__))\n");
     if (r.container_bits == 64)
     {
         fprintf(f, "#define CGSME_POPCOUNT(x) __builtin_popcountll((uint64_t)(x))\n");
         fprintf(f, "#define CGSME_CTZ(x)      __builtin_ctzll((uint64_t)(x))\n");
+        fprintf(f, "#else\n");
+        fprintf(f, "static inline int cgsme_popcount64_portable(uint64_t x) {\n");
+        fprintf(f, "    x = x - ((x >> 1) & 0x5555555555555555ULL);\n");
+        fprintf(f, "    x = (x & 0x3333333333333333ULL) + ((x >> 2) & 0x3333333333333333ULL);\n");
+        fprintf(f, "    x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0FULL;\n");
+        fprintf(f, "    return (int)((x * 0x0101010101010101ULL) >> 56);\n");
+        fprintf(f, "}\n");
+        fprintf(f, "static inline int cgsme_ctz64_portable(uint64_t x) {\n");
+        fprintf(f, "    static const int tbl[32] = {\n");
+        fprintf(f, "        0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,\n");
+        fprintf(f, "        31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9\n");
+        fprintf(f, "    };\n");
+        fprintf(f, "    uint32_t lo = (uint32_t)x;\n");
+        fprintf(f, "    if (lo != 0)\n");
+        fprintf(f, "        return tbl[(uint32_t)(((lo & (0u - lo)) * 0x077CB531u) >> 27)];\n");
+        fprintf(f, "    uint32_t hi = (uint32_t)(x >> 32);\n");
+        fprintf(f, "    return (hi != 0) ? (32 + tbl[(uint32_t)(((hi & (0u - hi)) * 0x077CB531u) >> 27)]) : 64;\n");
+        fprintf(f, "}\n");
+        fprintf(f, "#define CGSME_POPCOUNT(x) cgsme_popcount64_portable((uint64_t)(x))\n");
+        fprintf(f, "#define CGSME_CTZ(x)      cgsme_ctz64_portable((uint64_t)(x))\n");
     }
     else
     {
         fprintf(f, "#define CGSME_POPCOUNT(x) __builtin_popcount((uint32_t)(x))\n");
         fprintf(f, "#define CGSME_CTZ(x)      __builtin_ctz((uint32_t)(x))\n");
+        fprintf(f, "#else\n");
+        fprintf(f, "static inline int cgsme_popcount32_portable(uint32_t x) {\n");
+        fprintf(f, "    x = x - ((x >> 1) & 0x55555555u);\n");
+        fprintf(f, "    x = (x & 0x33333333u) + ((x >> 2) & 0x33333333u);\n");
+        fprintf(f, "    return (int)((((x + (x >> 4)) & 0x0F0F0F0Fu) * 0x01010101u) >> 24);\n");
+        fprintf(f, "}\n");
+        fprintf(f, "static inline int cgsme_ctz32_portable(uint32_t x) {\n");
+        fprintf(f, "    static const int tbl[32] = {\n");
+        fprintf(f, "        0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,\n");
+        fprintf(f, "        31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9\n");
+        fprintf(f, "    };\n");
+        fprintf(f, "    return (x != 0) ? tbl[(uint32_t)(((x & (0u - x)) * 0x077CB531u) >> 27)] : 32;\n");
+        fprintf(f, "}\n");
+        fprintf(f, "#define CGSME_POPCOUNT(x) cgsme_popcount32_portable((uint32_t)(x))\n");
+        fprintf(f, "#define CGSME_CTZ(x)      cgsme_ctz32_portable((uint32_t)(x))\n");
     }
+    fprintf(f, "#endif\n");
     fprintf(f, "#define CGSME_BIT(i)          (((cgsme_tile_t)1) << (i))\n");
     fprintf(f, "#define Empty_Tile            ((cgsme_tile_t)0)\n");
     fprintf(f, "#define All_Possible_State    ((cgsme_tile_t)0x%" PRIX64 "ULL)\n\n", r.all_possible);

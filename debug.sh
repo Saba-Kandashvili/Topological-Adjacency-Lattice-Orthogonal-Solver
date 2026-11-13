@@ -4,12 +4,18 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 pushd "$SCRIPT_DIR" > /dev/null || exit 1
 
+TILESET_FILE="${CGSME_TILESET:-tileset.json}"
+if [ $# -gt 0 ] && [[ "$1" == *.json ]] && [ -f "$1" ]; then
+    TILESET_FILE="$1"
+    shift
+fi
+
 echo "---------------------------------------------------"
-echo "0. Baking tileset.json -> cgsme_tileset_baked.h..."
+echo "0. Baking ${TILESET_FILE} -> cgsme_tileset_baked.h..."
 echo "---------------------------------------------------"
 
 gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe \
-    && ./cgsme_codegen.exe tileset.json cgsme_tileset_baked.h
+    && ./cgsme_codegen.exe "$TILESET_FILE" cgsme_tileset_baked.h
 
 if [ $? -ne 0 ]; then
     echo "Tileset baking failed!"
@@ -55,7 +61,7 @@ echo "---------------------------------------------------"
 echo "3. Launching Visualizer..."
 echo "---------------------------------------------------"
 
-love .
+CGSME_TILESET="$TILESET_FILE" love .
 
 echo "Done."
 

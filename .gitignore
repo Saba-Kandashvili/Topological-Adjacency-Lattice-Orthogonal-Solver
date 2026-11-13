@@ -4,3 +4,12 @@ CMakeCache.txt
 CMakeFiles/
 *.user
 cgsme_debug.log
+
+# Auto-generated tileset headers and codegen binaries
+cgsme_tileset_baked.h
+*_baked.h
+cgsme_codegen
+cgsme_codegen.exe
+*.dll
+*.so
+*.dylib
