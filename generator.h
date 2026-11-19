@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include "tiles.h" // cgsme_tile_t
 
+void collapseTile(cgsme_tile_t *tile, float *rates, uint32_t *rng);
 cgsme_tile_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness);
 
 void freeGrid(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height);

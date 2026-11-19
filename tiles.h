@@ -17,18 +17,35 @@
 
 	DO NOT edit cgsme_tileset_baked.h by hand, edit tileset.json and re-run cgsme_codegen
 */
-#ifdef CGSME_USE_CMAKE_BAKED
+#ifdef CGSME_SOFT_MODE
+#include "cgsme_soft.h"
+#elif defined(CGSME_USE_CMAKE_BAKED)
 #include <cgsme_tileset_baked.h>
 #else
 #include "cgsme_tileset_baked.h"
 #endif
 
-// standardized direction indices used to index every LUT (0=N, 1=E, 2=S, 3=W)
+#ifndef CGSME_MAX_CATEGORIES
+#define CGSME_MAX_CATEGORIES 16
+#endif
+
+#ifndef CGSME_NUM_SOCKETS
+#define CGSME_NUM_SOCKETS 2
+#endif
+
+// standardized direction indices used to index every LUT (0=N, 1=E, 2=S, 3=W, 4=U, 5=D)
 #ifndef DIR_IDX_N
 #define DIR_IDX_N 0
 #define DIR_IDX_E 1
 #define DIR_IDX_S 2
 #define DIR_IDX_W 3
+#define DIR_IDX_U 4
+#define DIR_IDX_D 5
+#endif
+
+#ifndef VERT_IDX_UP
+#define VERT_IDX_UP   0
+#define VERT_IDX_DOWN 1
 #endif
 
 #ifndef DIR_OPPOSITE
