@@ -145,7 +145,7 @@ endif()
 # optional debug_gen cli
 if(CGSME_BUILD_CLI)
     add_executable(debug_gen
-        "${CMAKE_CURRENT_SOURCE_DIR}/main.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/debug/main.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_ruleset.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_soft.c"
         ${CGSME_SOURCES}
