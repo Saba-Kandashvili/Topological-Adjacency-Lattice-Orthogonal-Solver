@@ -1,55 +1,62 @@
 cmake_minimum_required(VERSION 3.15)
 project(CGSME C)
 
-# CMAKE_MSVC_RUNTIME_LIBRARY is ignored unless CMP0091 is NEW. Requiring
-# CMake >= 3.15 makes that the default, but set it explicitly to be safe.
+# needed for CMAKE_MSVC_RUNTIME_LIBRARY
 if(POLICY CMP0091)
     cmake_policy(SET CMP0091 NEW)
 endif()
 
-# Statically link the MSVC runtime -> no dependency on vcruntimeXXX.dll /
-# msvcpXXX.dll at load time.
+# static msvc runtime so no vcruntime dll dependency
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-# Configurable tileset ruleset (override with -DCGSME_TILESET_FILE=/path/to/custom.json)
+# override with -DCGSME_TILESET_FILE=/path/to/custom.json
 set(CGSME_TILESET_FILE "${CMAKE_CURRENT_SOURCE_DIR}/tileset.json"
     CACHE FILEPATH "Path to the tileset JSON ruleset baked into C at build time")
 get_filename_component(CGSME_TILESET_ABS "${CGSME_TILESET_FILE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 option(CGSME_BUILD_CLI "Build the standalone debug_gen CLI executable" OFF)
 
-# ---------------------------------------------------------------------------
-# 1. Build-Time Tileset Codegen (tileset.json -> generated/cgsme_tileset_baked.h)
-# ---------------------------------------------------------------------------
+# build-time tileset codegen
 set(CGSME_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(CGSME_BAKED_HEADER "${CGSME_GENERATED_DIR}/cgsme_tileset_baked.h")
 file(MAKE_DIRECTORY "${CGSME_GENERATED_DIR}")
 
-# Force a clean rebake if CGSME_TILESET_FILE was switched to a different JSON path
+# rebake if tileset path changed
 if(DEFINED CGSME_BAKED_SOURCE AND NOT CGSME_BAKED_SOURCE STREQUAL CGSME_TILESET_ABS)
     file(REMOVE "${CGSME_BAKED_HEADER}")
 endif()
 set(CGSME_BAKED_SOURCE "${CGSME_TILESET_ABS}" CACHE INTERNAL "Last baked tileset JSON path")
 
-if(CMAKE_CROSSCOMPILING)
+if(CMAKE_CROSSCOMPILING OR (WIN32 AND NOT CMAKE_HOST_WIN32))
     if(NOT CGSME_CODEGEN_EXECUTABLE)
         find_program(CGSME_CODEGEN_EXECUTABLE cgsme_codegen)
     endif()
-    if(NOT CGSME_CODEGEN_EXECUTABLE)
+    if(CGSME_CODEGEN_EXECUTABLE)
+        set(CGSME_CODEGEN_CMD "${CGSME_CODEGEN_EXECUTABLE}" "${CGSME_TILESET_ABS}" "${CGSME_BAKED_HEADER}")
+        set(CGSME_CODEGEN_DEPS "")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_tileset_baked.h")
+        message(STATUS "Cross-compiling without host cgsme_codegen: using pre-baked cgsme_tileset_baked.h")
+        set(CGSME_CODEGEN_CMD "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_tileset_baked.h" "${CGSME_BAKED_HEADER}")
+        set(CGSME_CODEGEN_DEPS "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_tileset_baked.h")
+    else()
         message(FATAL_ERROR
-            "Cross-compiling requires a host cgsme_codegen executable. "
-            "Build it natively and pass -DCGSME_CODEGEN_EXECUTABLE=/path/to/cgsme_codegen")
+            "Cross-compiling requires either pre-baked cgsme_tileset_baked.h or "
+            "-DCGSME_CODEGEN_EXECUTABLE=/path/to/cgsme_codegen")
     endif()
-    set(CGSME_CODEGEN_CMD "${CGSME_CODEGEN_EXECUTABLE}")
-    set(CGSME_CODEGEN_DEPS "")
 else()
-    add_executable(cgsme_codegen
+    add_executable(cgsme_codegen EXCLUDE_FROM_ALL
         "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_codegen.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_ruleset.c"
+    )
+    set_target_properties(cgsme_codegen PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/codegen_tool"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/codegen_tool"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/codegen_tool"
     )
     target_include_directories(cgsme_codegen PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     if(NOT WIN32)
@@ -58,14 +65,14 @@ else()
     if(MSVC)
         target_compile_definitions(cgsme_codegen PRIVATE _CRT_SECURE_NO_WARNINGS)
     endif()
-    set(CGSME_CODEGEN_CMD $<TARGET_FILE:cgsme_codegen>)
+    set(CGSME_CODEGEN_CMD $<TARGET_FILE:cgsme_codegen> "${CGSME_TILESET_ABS}" "${CGSME_BAKED_HEADER}")
     set(CGSME_CODEGEN_DEPS cgsme_codegen)
 endif()
 
 add_custom_command(
     OUTPUT "${CGSME_BAKED_HEADER}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CGSME_GENERATED_DIR}"
-    COMMAND ${CGSME_CODEGEN_CMD} "${CGSME_TILESET_ABS}" "${CGSME_BAKED_HEADER}"
+    COMMAND ${CGSME_CODEGEN_CMD}
     DEPENDS
         ${CGSME_CODEGEN_DEPS}
         "${CGSME_TILESET_ABS}"
@@ -78,9 +85,7 @@ add_custom_command(
 
 add_custom_target(cgsme_bake DEPENDS "${CGSME_BAKED_HEADER}")
 
-# ---------------------------------------------------------------------------
-# 2. CGSME Shared Library (.dll / .so / .dylib)
-# ---------------------------------------------------------------------------
+# shared lib (.dll / .so / .dylib)
 set(CGSME_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/generator.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_debug.c"
@@ -94,8 +99,7 @@ set(CGSME_SOURCES
 add_library(${PROJECT_NAME} SHARED ${CGSME_SOURCES} "${CGSME_BAKED_HEADER}")
 add_dependencies(${PROJECT_NAME} cgsme_bake)
 
-# Put generated header dir BEFORE source dir and force angle-bracket lookup via
-# CGSME_USE_CMAKE_BAKED so stale headers in the repo root never shadow it.
+# put generated header dir first so old headers in repo root dont shadow it
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${CGSME_GENERATED_DIR}")
 target_include_directories(${PROJECT_NAME} PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -113,18 +117,12 @@ if(MSVC)
     target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
-# Auto-export every public symbol from the DLL even though the sources
-# have no __declspec(dllexport). Works for MSVC and MinGW.
+# export all symbols on windows without __declspec(dllexport)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
-# Threading and math:
-# - Windows: tinycthread's Win32 backend needs no extra thread library, so
-#   skip find_package(Threads) entirely. Linking it on MinGW would pull in
-#   libwinpthread-1.dll unless special-cased, which is one more thing to
-#   get wrong, so just don't link it.
-# - Everywhere else (Linux, macOS): pthread + libm (when present) are required.
+# windows uses win32 threads directly; linux/macos need pthread + libm
 if(NOT WIN32)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
@@ -136,8 +134,7 @@ if(NOT WIN32)
     endif()
 endif()
 
-# Fully static MinGW toolchain runtime -> no dependency on
-# libgcc_s_seh-1.dll / libwinpthread-1.dll / libstdc++-6.dll at load time.
+# static mingw runtime so no extra dlls needed
 if(MINGW)
     target_link_options(${PROJECT_NAME} PRIVATE
         -static
@@ -145,12 +142,12 @@ if(MINGW)
     )
 endif()
 
-# ---------------------------------------------------------------------------
-# 3. Optional Standalone CLI Runner (debug_gen)
-# ---------------------------------------------------------------------------
+# optional debug_gen cli
 if(CGSME_BUILD_CLI)
     add_executable(debug_gen
         "${CMAKE_CURRENT_SOURCE_DIR}/main.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_ruleset.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_soft.c"
         ${CGSME_SOURCES}
         "${CGSME_BAKED_HEADER}"
     )

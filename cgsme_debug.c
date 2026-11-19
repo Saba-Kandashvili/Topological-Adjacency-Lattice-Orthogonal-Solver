@@ -176,13 +176,8 @@ void cgsme_profile_record(const char *name, uint64_t elapsed_us, uint64_t elapse
     if (!g_logmtx_active)
         return;
 
-    // Fast-path: if debug disabled, skip
     if (!g_enabled)
         return;
-
-    // Previously we skipped zero measurements; record everything so counts and distributions
-    // include very fast functions (min_us may be 0). This makes it easier to see how time
-    // is spread across all instrumented functions.
 
     mtx_lock(&g_logmtx);
     ProfileEntry *p = cgsme_profile_find_or_create(name);
@@ -201,7 +196,7 @@ void cgsme_profile_record(const char *name, uint64_t elapsed_us, uint64_t elapse
         if (elapsed_cycles > p->max_cycles)
             p->max_cycles = elapsed_cycles;
 
-        // Per-invocation logging if above thresholds
+        // log slow calls above threshold
         if ((g_profile_threshold_us && elapsed_us >= g_profile_threshold_us) ||
             (g_profile_threshold_cycles && elapsed_cycles >= g_profile_threshold_cycles))
         {
@@ -222,7 +217,7 @@ void cgsme_shutdown_debug(void)
     if (!g_logmtx_active)
         return;
 
-    // Print profiling summary if present
+    // print profiling summary
     mtx_lock(&g_logmtx);
     if (g_profile_count > 0 && g_logfile)
     {
@@ -253,7 +248,7 @@ void cgsme_shutdown_debug(void)
             }
             qsort(arr, g_profile_count, sizeof(ProfileEntry), cmp);
 
-            // Human-friendly table header
+            // table header
             fprintf(g_logfile, "%-30s %10s %12s %8s %8s %8s %14s %12s %12s %12s %8s\n",
                     "name", "count", "total_us", "avg_us", "min_us", "max_us",
                     "total_cycles", "avg_cyc", "min_cyc", "max_cyc", "%tot");
@@ -281,7 +276,7 @@ void cgsme_shutdown_debug(void)
                         hot ? "[HOT]" : "");
             }
 
-            // Also print a machine-friendly CSV for ingestion
+            // csv dump
             fprintf(g_logfile, "\nCSV summary:\n");
             fprintf(g_logfile, "name,count,total_us,avg_us,min_us,max_us,total_cycles,avg_cycles,min_cycles,max_cycles,%%total_us\n");
             for (size_t i = 0; i < g_profile_count; ++i)
@@ -307,13 +302,12 @@ void cgsme_shutdown_debug(void)
             free(arr);
         }
 
-        // Print decorated run summary (if set)
+        // run summary
         if (g_runinfo.valid && g_logfile)
         {
             fprintf(g_logfile, "\n=============================================================\n");
             fprintf(g_logfile, "RUN SUMMARY: %u layers x %u x %u seed=%u fulness=%u\n", g_runinfo.layers, g_runinfo.width, g_runinfo.length, g_runinfo.seed, g_runinfo.fulness);
 
-            // Try to locate generateGrid entry (this represents wall-clock elapsed for the run)
             ProfileEntry *gen = NULL;
             for (size_t i = 0; i < g_profile_count; ++i)
             {
@@ -326,7 +320,6 @@ void cgsme_shutdown_debug(void)
 
             if (gen)
             {
-                // Wall-clock elapsed is best represented by generateGrid's total_us (one run)
                 fprintf(g_logfile, "Wall-clock (generateGrid): %llu us (%.6f s)\n", (unsigned long long)gen->total_us, (double)gen->total_us / 1000000.0);
                 fprintf(g_logfile, "Summed measured time (sum of per-function totals): %llu us\n", (unsigned long long)total_us);
                 fprintf(g_logfile, "Total cycles (sum of per-function cycles): %llu\n", (unsigned long long)total_cycles);
@@ -338,7 +331,6 @@ void cgsme_shutdown_debug(void)
             }
             else
             {
-                // Fallback: no generateGrid entry; print sums
                 fprintf(g_logfile, "Total time: %llu us (%.6f s)\n", (unsigned long long)total_us, (double)total_us / 1000000.0);
                 fprintf(g_logfile, "Total cycles: %llu\n", (unsigned long long)total_cycles);
             }
@@ -404,7 +396,6 @@ uint64_t cgsme_now_us(void)
     return (uint64_t)((now.QuadPart * 1000000ULL) / freq.QuadPart);
 #else
     struct timespec ts;
-    // CLOCK_MONOTONIC is appropriate for elapsed timings
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
         return 0;
     return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)(ts.tv_nsec / 1000ULL);
@@ -418,7 +409,6 @@ uint64_t cgsme_now_cycles(void)
     __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
     return ((uint64_t)hi << 32) | lo;
 #else
-    // Not supported on this architecture
     return 0;
 #endif
 }

@@ -67,7 +67,7 @@ void swapNodes(MinHeap *h, uint32_t i, uint32_t j)
 	h->nodes[i] = h->nodes[j];
 	h->nodes[j] = temp;
 
-	// Update the lookup map!
+	// update lookup map
 	uint32_t idx_i = h->nodes[i].y * h->width + h->nodes[i].x;
 	uint32_t idx_j = h->nodes[j].y * h->width + h->nodes[j].x;
 	h->indexMap[idx_i] = i;
@@ -142,12 +142,16 @@ void heapInsertOrUpdate(MinHeap *h, cgsme_tile_t **grid, uint32_t x, uint32_t y,
 
 	if (currentHeapIdx != -1)
 	{
-		// ALREADY IN HEAP: Update score
-		// entropy only ever decreases, so score only decreases. just bubble up.
+		// already in heap, update score and rebalance
 		if (score < h->nodes[currentHeapIdx].score)
 		{
 			h->nodes[currentHeapIdx].score = score;
 			bubbleUp(h, currentHeapIdx);
+		}
+		else if (score > h->nodes[currentHeapIdx].score)
+		{
+			h->nodes[currentHeapIdx].score = score;
+			bubbleDown(h, currentHeapIdx);
 		}
 	}
 	else

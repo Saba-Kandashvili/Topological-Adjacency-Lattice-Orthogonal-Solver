@@ -1,54 +1,108 @@
 @echo off
-REM Ensure script runs from its own directory so relative paths resolve
+setlocal EnableDelayedExpansion
+REM run from script dir so relative paths work
 pushd %~dp0
 
 set "TILESET_FILE=%CGSME_TILESET%"
-set "GEN_ARGS=%*"
-if not "%~1"=="" (
-    if /I "%~x1"==".json" (
+if "%TILESET_FILE%"=="" set "TILESET_FILE=tileset.json"
+set "SOFT_MODE=0"
+set "FORWARD_ARGS="
+
+:parse_args
+if "%~1"=="" goto done_args
+if /I "%~1"=="--soft" (
+    set "SOFT_MODE=1"
+    if not "%~2"=="" (
+        if /I "%~x2"==".json" (
+            set "TILESET_FILE=%~2"
+            shift
+        )
+    )
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-s" (
+    set "SOFT_MODE=1"
+    if not "%~2"=="" (
+        if /I "%~x2"==".json" (
+            set "TILESET_FILE=%~2"
+            shift
+        )
+    )
+    shift
+    goto parse_args
+)
+if /I "%~x1"==".json" (
+    if exist "%~1" (
         set "TILESET_FILE=%~1"
-        for /f "tokens=1*" %%A in ("%*") do set "GEN_ARGS=%%B"
+        shift
+        goto parse_args
     )
 )
-if "%TILESET_FILE%"=="" set "TILESET_FILE=tileset.json"
+set "FORWARD_ARGS=!FORWARD_ARGS! %1"
+shift
+goto parse_args
+:done_args
 
-echo ---------------------------------------------------
-echo 0. Baking %TILESET_FILE% -^> cgsme_tileset_baked.h...
-echo ---------------------------------------------------
-gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe
-if %ERRORLEVEL% NEQ 0 (
-    echo Tileset codegen compile failed!
-    pause
-    exit /b
+if "%SOFT_MODE%"=="1" (
+    echo ---------------------------------------------------
+    echo 0. Soft Mode Enabled ^(%TILESET_FILE%^) - Skipping Codegen
+    echo ---------------------------------------------------
+    if not exist "cgsme_tileset_baked.h" (
+        gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe
+        cgsme_codegen.exe "tileset.json" cgsme_tileset_baked.h
+    )
+    echo ---------------------------------------------------
+    echo 1. Compiling C Code ^(Soft Mode - No Header Rebake^)...
+    echo ---------------------------------------------------
+    gcc -std=c11 -O3 -g -Dcgsme_DEBUG -D_GNU_SOURCE main.c cgsme_ruleset.c cgsme_soft.c generator.c cgsme_debug.c cgsme_utils.c cgsme_noise.c cgsme_topology.c cgsme_solver.c tinycthread/tinycthread.c -o debug_gen.exe -I. -pthread -lm
+    if !ERRORLEVEL! NEQ 0 (
+        echo Compilation Failed!
+        pause
+        popd
+        exit /b 1
+    )
+    echo.
+    echo ---------------------------------------------------
+    echo 2. Running Generator ^(--soft %TILESET_FILE%^)...
+    echo ---------------------------------------------------
+    debug_gen.exe --cgsme-debug --soft "%TILESET_FILE%" !FORWARD_ARGS!
+) else (
+    echo ---------------------------------------------------
+    echo 0. Baking %TILESET_FILE% -^> cgsme_tileset_baked.h...
+    echo ---------------------------------------------------
+    gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe
+    if !ERRORLEVEL! NEQ 0 (
+        echo Tileset codegen compile failed!
+        pause
+        popd
+        exit /b 1
+    )
+    cgsme_codegen.exe "%TILESET_FILE%" cgsme_tileset_baked.h
+    if !ERRORLEVEL! NEQ 0 (
+        echo Tileset baking failed!
+        pause
+        popd
+        exit /b 1
+    )
+    echo.
+    echo ---------------------------------------------------
+    echo 1. Compiling C Code ^(Baked + Soft Mode^)...
+    echo ---------------------------------------------------
+    gcc -std=c11 -O3 -g -Dcgsme_DEBUG -D_GNU_SOURCE main.c cgsme_ruleset.c cgsme_soft.c generator.c cgsme_debug.c cgsme_utils.c cgsme_noise.c cgsme_topology.c cgsme_solver.c tinycthread/tinycthread.c -o debug_gen.exe -I. -pthread -lm
+    if !ERRORLEVEL! NEQ 0 (
+        echo Compilation Failed!
+        pause
+        popd
+        exit /b 1
+    )
+    echo Compilation Successful.
+    echo.
+    echo ---------------------------------------------------
+    echo 2. Running Generator ^(Baked^)...
+    echo ---------------------------------------------------
+    debug_gen.exe --cgsme-debug !FORWARD_ARGS!
 )
-cgsme_codegen.exe "%TILESET_FILE%" cgsme_tileset_baked.h
-if %ERRORLEVEL% NEQ 0 (
-    echo Tileset baking failed!
-    pause
-    exit /b
-)
-echo.
-
-echo ---------------------------------------------------
-echo 1. Compiling C Code...
-echo ---------------------------------------------------
-
-REM Build with cgsme_DEBUG and include the debug source so instrumentation is available
-gcc -std=c11 -O3 -g -Dcgsme_DEBUG -D_GNU_SOURCE main.c generator.c cgsme_debug.c cgsme_utils.c cgsme_noise.c cgsme_topology.c cgsme_solver.c tinycthread/tinycthread.c -o debug_gen.exe -I. -pthread -lm
-if %ERRORLEVEL% NEQ 0 (
-    echo Compilation Failed!
-    pause
-    exit /b
-)
-
-echo Compilation Successful.
-
-echo.
-echo ---------------------------------------------------
-echo 2. Running Generator...
-echo ---------------------------------------------------
-
-debug_gen.exe --cgsme-debug %GEN_ARGS%
 
 echo.
 echo ---------------------------------------------------

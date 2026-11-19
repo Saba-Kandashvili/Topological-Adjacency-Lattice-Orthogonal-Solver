@@ -1,6 +1,7 @@
 #include "cgsme_noise.h"
 #include "cgsme_utils.h"
 #include "tiles.h"
+#include <string.h>
 
 // for sorting, DESCENDING order (high score / best ridge first)
 int comparePixels(const void *a, const void *b)
@@ -28,10 +29,10 @@ static uint32_t noiseHash(uint32_t n, uint32_t seed)
 // returns 0.0 to 1.0
 float getValueNoise(float x, float y, uint32_t seed)
 {
-    uint32_t X = (uint32_t)floorf(x);
-    uint32_t Y = (uint32_t)floorf(y);
-    float fx = x - X;
-    float fy = y - Y;
+    uint32_t X = (x >= 0.0f) ? (uint32_t)x : (uint32_t)(int32_t)floorf(x);
+    uint32_t Y = (y >= 0.0f) ? (uint32_t)y : (uint32_t)(int32_t)floorf(y);
+    float fx = x - (float)X;
+    float fy = y - (float)Y;
 
     // smoothstep for natural transitions
     float sx = fx * fx * (3.0f - 2.0f * fx);
@@ -39,10 +40,11 @@ float getValueNoise(float x, float y, uint32_t seed)
 
     // hash the 4 corners
     // we normalize the hash (uint32 max) to 0.0-1.0 float
-    float n00 = (float)noiseHash(X + Y * 57, seed) / 4294967296.0f;
-    float n10 = (float)noiseHash(X + 1 + Y * 57, seed) / 4294967296.0f;
-    float n01 = (float)noiseHash(X + (Y + 1) * 57, seed) / 4294967296.0f;
-    float n11 = (float)noiseHash(X + 1 + (Y + 1) * 57, seed) / 4294967296.0f;
+    const float invU32 = 1.0f / 4294967296.0f;
+    float n00 = (float)noiseHash(X + Y * 57, seed) * invU32;
+    float n10 = (float)noiseHash(X + 1 + Y * 57, seed) * invU32;
+    float n01 = (float)noiseHash(X + (Y + 1) * 57, seed) * invU32;
+    float n11 = (float)noiseHash(X + 1 + (Y + 1) * 57, seed) * invU32;
 
     // bilinear interpolation
     float ix0 = n00 + sx * (n10 - n00);
@@ -50,24 +52,19 @@ float getValueNoise(float x, float y, uint32_t seed)
     return ix0 + sy * (ix1 - ix0);
 }
 
-// BFS to count the size of a region (non-recursive to avoid stack issues)
-int measureRegionSize(cgsme_tile_t ***grid, bool *visited, int width, int length, int startX, int startY)
+static int measureRegionSizeWithQueue(
+    cgsme_tile_t ***grid, bool *visited, int width, int length, int startX, int startY, Point2D *queue)
 {
     int count = 0;
     int head = 0;
     int tail = 0;
 
-    // allocate
-    Point2D *queue = malloc(sizeof(Point2D) * width * length);
-    if (!queue)
-        return 0; // FIX: guard against allocation failure
-
     queue[tail++] = (Point2D){startX, startY};
     visited[startY * width + startX] = true;
     count++;
 
-    int dx[] = {0, 0, 1, -1};
-    int dy[] = {1, -1, 0, 0};
+    static const int dx[4] = {0, 0, 1, -1};
+    static const int dy[4] = {1, -1, 0, 0};
 
     while (head < tail)
     {
@@ -91,6 +88,17 @@ int measureRegionSize(cgsme_tile_t ***grid, bool *visited, int width, int length
         }
     }
 
+    return count;
+}
+
+// BFS to count the size of a region (non-recursive to avoid stack issues)
+int measureRegionSize(cgsme_tile_t ***grid, bool *visited, int width, int length, int startX, int startY)
+{
+    Point2D *queue = malloc(sizeof(Point2D) * width * length);
+    if (!queue)
+        return 0;
+
+    int count = measureRegionSizeWithQueue(grid, visited, width, length, startX, startY, queue);
     free(queue);
     return count;
 }
@@ -100,14 +108,14 @@ void keepOnlyLargestMask(cgsme_tile_t ***grid, int width, int length, int height
 {
     bool *isMain = calloc(width * length, sizeof(bool));
     if (!isMain)
-        return; // FIX: guard allocation
+        return;
 
     Point2D *queue = malloc(sizeof(Point2D) * width * length);
     if (!queue)
     {
         free(isMain);
         return;
-    } // FIX: guard allocation
+    }
 
     int head = 0, tail = 0;
 
@@ -157,7 +165,7 @@ int dilateMask(cgsme_tile_t ***grid, int width, int length, int height, int maxT
     int added = 0;
     bool *toAdd = calloc(width * length, sizeof(bool));
     if (!toAdd)
-        return 0; // FIX: guard allocation
+        return 0;
 
     // scan the whole map to find all valid growth spots
     for (int y = 0; y < length; y++)
@@ -187,7 +195,7 @@ int dilateMask(cgsme_tile_t ***grid, int width, int length, int height, int maxT
                 if (added >= maxToAdd)
                 {
                     goto done;
-                } // FIXED: >= ensures strict limit
+                }
 
                 for (int z = 0; z < height; z++)
                     grid[z][y][x] = All_Possible_State;
@@ -201,7 +209,53 @@ done:
     return added;
 }
 
+// layer 0 island filter reusing scratch buffers
+static int keepOnlyLargestMaskLayer0(
+    cgsme_tile_t ***grid, int width, int length, int startX, int startY, bool *isMain, Point2D *queue)
+{
+    memset(isMain, 0, (size_t)width * (size_t)length * sizeof(bool));
+    int head = 0, tail = 0;
+    queue[tail++] = (Point2D){startX, startY};
+    isMain[startY * width + startX] = true;
+
+    static const int dx[4] = {0, 0, 1, -1};
+    static const int dy[4] = {1, -1, 0, 0};
+
+    while (head < tail)
+    {
+        Point2D c = queue[head++];
+        for (int i = 0; i < 4; i++)
+        {
+            int nx = c.x + dx[i];
+            int ny = c.y + dy[i];
+            if (nx < 0 || ny < 0 || nx >= width || ny >= length)
+                continue;
+
+            if (grid[0][ny][nx] != Empty_Tile && !isMain[ny * width + nx])
+            {
+                isMain[ny * width + nx] = true;
+                queue[tail++] = (Point2D){nx, ny};
+            }
+        }
+    }
+
+    int kept = 0;
+    for (int y = 0; y < length; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            if (isMain[y * width + x])
+                kept++;
+            else if (grid[0][y][x] != Empty_Tile)
+                grid[0][y][x] = Empty_Tile;
+        }
+    }
+    return kept;
+}
+
 // RIDGED NOISE MASK GENERATION
+#define CGSME_NOISE_HIST_BINS 4096
+
 void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t targetFullness, uint32_t seed)
 {
     CGSME_PROFILE_FUNC();
@@ -218,9 +272,9 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
     if (targetCount > totalPixels)
         targetCount = totalPixels;
 
-    PixelData *pixels = malloc(sizeof(PixelData) * totalPixels);
-    if (!pixels)
-        return; // FIX: guard allocation
+    float *scores = malloc(sizeof(float) * totalPixels);
+    if (!scores)
+        return;
 
 #ifdef cgsme_DEBUG
     float *debugMap = malloc(sizeof(float) * totalPixels);
@@ -235,17 +289,22 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
     float warpFreq = baseFreq * 0.5f; // warp is usually lower freq than the main noise
     float warpAmp = 4.0f;             // distort coordinates by 4 tiles
 
-    int pIdx = 0;
+    uint32_t hist[CGSME_NOISE_HIST_BINS] = {0};
+    uint32_t pIdx = 0;
     for (uint32_t y = 0; y < length; y++)
     {
+        float fy = (float)y;
+        float wyCoord = fy * warpFreq;
         for (uint32_t x = 0; x < width; x++)
         {
+            float fx = (float)x;
+            float wxCoord = fx * warpFreq;
             // domain warping
-            float q = getValueNoise(x * warpFreq, y * warpFreq, seed);
-            float r = getValueNoise(x * warpFreq + 5.2f, y * warpFreq + 1.3f, seed);
+            float q = getValueNoise(wxCoord, wyCoord, seed);
+            float r = getValueNoise(wxCoord + 5.2f, wyCoord + 1.3f, seed);
 
-            float wx = x + (q * warpAmp);
-            float wy = y + (r * warpAmp);
+            float wx = fx + (q * warpAmp);
+            float wy = fy + (r * warpAmp);
 
             // ridged noise on warped coordinates
             float n = getValueNoise(wx * baseFreq, wy * baseFreq, seed);
@@ -253,13 +312,17 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
             // The Ridge Math
             float ridge = 1.0f - fabsf((n - 0.5f) * 2.0f);
             ridge = ridge * ridge; // sharpen it (makes lines thinner initially)
+            if (ridge < 0.0f) ridge = 0.0f;
+            if (ridge > 1.0f) ridge = 1.0f;
 
-            pixels[pIdx].x = x;
-            pixels[pIdx].y = y;
-            pixels[pIdx].score = ridge;
+            scores[pIdx] = ridge;
+            uint32_t bin = (uint32_t)(ridge * (float)(CGSME_NOISE_HIST_BINS - 1));
+            if (bin >= CGSME_NOISE_HIST_BINS)
+                bin = CGSME_NOISE_HIST_BINS - 1;
+            hist[bin]++;
 
 #ifdef cgsme_DEBUG
-            debugMap[y * width + x] = ridge;
+            debugMap[pIdx] = ridge;
 #endif
 
             pIdx++;
@@ -271,40 +334,92 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
     free(debugMap);
 #endif
 
-    // SORT DESCENDING (Best Ridges First)
-    qsort(pixels, totalPixels, sizeof(PixelData), comparePixels);
-
-    // Reset Layer 0
-    int currentFilled = 0;
-    for (int y = 0; y < length; y++)
-        for (int x = 0; x < width; x++)
-            grid[0][y][x] = Empty_Tile;
-
-    // Fill best pixels on Layer 0
-    for (uint32_t i = 0; i < targetCount; i++)
+    // find cutoff histogram bin so we only sort the border bucket
+    uint32_t aboveCount = 0;
+    uint32_t cutBin = 0;
+    for (int b = CGSME_NOISE_HIST_BINS - 1; b >= 0; b--)
     {
-        uint16_t px = pixels[i].x;
-        uint16_t py = pixels[i].y;
-        grid[0][py][px] = All_Possible_State;
-        currentFilled++;
+        if (aboveCount + hist[b] >= targetCount)
+        {
+            cutBin = (uint32_t)b;
+            break;
+        }
+        aboveCount += hist[b];
     }
 
-    free(pixels);
+    uint32_t cutTotal = hist[cutBin];
+    uint32_t needFromCut = (targetCount > aboveCount) ? (targetCount - aboveCount) : 0;
+    if (needFromCut > cutTotal)
+        needFromCut = cutTotal;
 
-    // --- SANITIZE (Delete Islands) ---
-    bool *visited = calloc(width * length, sizeof(bool));
-    if (visited)
+    // reset layer 0 and fill everything above cutBin
+    uint32_t currentFilled = 0;
+    PixelData *cutBuf = (needFromCut > 0 && cutTotal > needFromCut) ? malloc(sizeof(PixelData) * cutTotal) : NULL;
+    uint32_t cutIdx = 0;
+
+    pIdx = 0;
+    for (uint32_t y = 0; y < length; y++)
+    {
+        for (uint32_t x = 0; x < width; x++)
+        {
+            float ridge = scores[pIdx++];
+            uint32_t bin = (uint32_t)(ridge * (float)(CGSME_NOISE_HIST_BINS - 1));
+            if (bin >= CGSME_NOISE_HIST_BINS)
+                bin = CGSME_NOISE_HIST_BINS - 1;
+
+            if (bin > cutBin)
+            {
+                grid[0][y][x] = All_Possible_State;
+                currentFilled++;
+            }
+            else if (bin == cutBin && cutTotal <= needFromCut && needFromCut > 0)
+            {
+                grid[0][y][x] = All_Possible_State;
+                currentFilled++;
+            }
+            else
+            {
+                grid[0][y][x] = Empty_Tile;
+                if (bin == cutBin && cutBuf && cutIdx < cutTotal)
+                {
+                    cutBuf[cutIdx].x = (uint16_t)x;
+                    cutBuf[cutIdx].y = (uint16_t)y;
+                    cutBuf[cutIdx].score = ridge;
+                    cutIdx++;
+                }
+            }
+        }
+    }
+
+    if (cutBuf)
+    {
+        qsort(cutBuf, cutIdx, sizeof(PixelData), comparePixels);
+        uint32_t take = (needFromCut < cutIdx) ? needFromCut : cutIdx;
+        for (uint32_t i = 0; i < take; i++)
+        {
+            grid[0][cutBuf[i].y][cutBuf[i].x] = All_Possible_State;
+            currentFilled++;
+        }
+        free(cutBuf);
+    }
+
+    free(scores);
+
+    // delete islands
+    bool *visited = calloc(totalPixels, sizeof(bool));
+    Point2D *bfsQueue = malloc(sizeof(Point2D) * totalPixels);
+    if (visited && bfsQueue)
     {
         int maxRegionSize = 0;
         int bestX = -1, bestY = -1;
 
-        for (int y = 0; y < length; y++)
+        for (int y = 0; y < (int)length; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < (int)width; x++)
             {
-                if (grid[0][y][x] != Empty_Tile && !visited[y * width + x])
+                if (grid[0][y][x] != Empty_Tile && !visited[y * (int)width + x])
                 {
-                    int size = measureRegionSize(grid, visited, width, length, x, y);
+                    int size = measureRegionSizeWithQueue(grid, visited, (int)width, (int)length, x, y, bfsQueue);
                     if (size > maxRegionSize)
                     {
                         maxRegionSize = size;
@@ -314,50 +429,38 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
                 }
             }
         }
-        free(visited);
 
         if (bestX != -1)
-        {
-            keepOnlyLargestMask(grid, width, length, height, bestX, bestY);
-            // Re-count after pruning (FIX: don't use freed 'visited', simply scan)
-            currentFilled = 0;
-            for (int y = 0; y < length; y++)
-                for (int x = 0; x < width; x++)
-                    if (grid[0][y][x] != Empty_Tile)
-                        currentFilled++;
-        }
+            currentFilled = (uint32_t)keepOnlyLargestMaskLayer0(grid, (int)width, (int)length, bestX, bestY, visited, bfsQueue);
     }
+    free(visited);
+    free(bfsQueue);
 
     // SAFETY PASS (force minimum thickness)
     // ALWAYS dilate at least once. this turns 1-pixel lines into 3-pixel lines
     // this solves the 2x200 crash
 
-    int added = dilateMask(grid, width, length, height, 1000000); // Unlimited dilation TODO: CLEANER APROACH: add a bool argument to ignore th eneeded amount
-    currentFilled += added;
+    int added = dilateMask(grid, width, length, 1, 1000000); // dilate layer 0 only, copied to rest below
+    currentFilled += (uint32_t)added;
 
     // RESCUE (dilate back to target)
     int safety = 0;
     while (currentFilled < targetCount && safety < 1000)
     {
         // calulate remaining
-        int needed = targetCount - currentFilled;
-        int added = dilateMask(grid, width, length, height, needed);
-        if (added == 0)
+        int needed = (int)(targetCount - currentFilled);
+        int stepAdded = dilateMask(grid, width, length, 1, needed);
+        if (stepAdded == 0)
             break;
-        currentFilled += added;
+        currentFilled += (uint32_t)stepAdded;
         safety++;
     }
 
     // apply Layer 0 to All layers
-    for (int z = 1; z < height; z++)
+    for (uint32_t z = 1; z < height; z++)
     {
-        for (int y = 0; y < length; y++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                grid[z][y][x] = grid[0][y][x];
-            }
-        }
+        for (uint32_t y = 0; y < length; y++)
+            memcpy(grid[z][y], grid[0][y], width * sizeof(cgsme_tile_t));
     }
 
 // DEBUG DUMP
