@@ -2,7 +2,7 @@
 -- CONFIGURATION
 -- =================================================
 local DEFAULT_IMAGE_DIR = "tile_mock/"
-local DEFAULT_TILESET_FILE = "tileset.json"
+local DEFAULT_TILESET_FILE = "../tileset.json"
 local TILESETS_ROOT_DIR = "tilesets"
 local PROC_TILE_PX = 32
 

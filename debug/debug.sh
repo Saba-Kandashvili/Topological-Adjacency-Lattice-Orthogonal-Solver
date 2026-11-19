@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 
-# run from script dir so relative paths work
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-pushd "$SCRIPT_DIR" > /dev/null || exit 1
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CALLER_DIR="$(pwd)"
 
-TILESET_FILE="${CGSME_TILESET:-tileset.json}"
+resolve_tileset() {
+    local arg="$1"
+    if [ -f "$arg" ]; then
+        echo "$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")"
+    elif [ -f "$CALLER_DIR/$arg" ]; then
+        echo "$(cd "$(dirname "$CALLER_DIR/$arg")" && pwd)/$(basename "$arg")"
+    elif [ -f "$ROOT_DIR/$arg" ]; then
+        echo "$(cd "$(dirname "$ROOT_DIR/$arg")" && pwd)/$(basename "$arg")"
+    else
+        echo "$arg"
+    fi
+}
+
+TILESET_FILE="${CGSME_TILESET:-$ROOT_DIR/tileset.json}"
 SOFT_MODE=0
 FORWARD_ARGS=()
 
@@ -12,20 +25,20 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --soft|-s)
             SOFT_MODE=1
-            if [ $# -gt 1 ] && [[ "$2" == *.json ]] && [ -f "$2" ]; then
-                TILESET_FILE="$2"
+            if [ $# -gt 1 ] && [[ "$2" == *.json ]]; then
+                TILESET_FILE="$(resolve_tileset "$2")"
                 shift
             fi
             shift
             ;;
         --soft=*)
             SOFT_MODE=1
-            TILESET_FILE="${1#--soft=}"
+            TILESET_FILE="$(resolve_tileset "${1#--soft=}")"
             shift
             ;;
         *.json)
-            if [ -f "$1" ]; then
-                TILESET_FILE="$1"
+            if [ -f "$1" ] || [ -f "$CALLER_DIR/$1" ] || [ -f "$ROOT_DIR/$1" ]; then
+                TILESET_FILE="$(resolve_tileset "$1")"
             else
                 FORWARD_ARGS+=("$1")
             fi
@@ -38,22 +51,25 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+TILESET_FILE="$(resolve_tileset "$TILESET_FILE")"
+pushd "$SCRIPT_DIR" > /dev/null || exit 1
+
 compile_debug_gen() {
     echo "---------------------------------------------------"
     echo "1. Compiling C Code (Baked + Soft Mode)..."
     echo "---------------------------------------------------"
     gcc -std=c11 -O3 -g -Dcgsme_DEBUG -D_GNU_SOURCE \
-        main.c \
-        cgsme_ruleset.c \
-        cgsme_soft.c \
-        generator.c \
-        cgsme_debug.c \
-        cgsme_utils.c \
-        cgsme_noise.c \
-        cgsme_topology.c \
-        cgsme_solver.c \
-        tinycthread/tinycthread.c \
-        -o debug_gen.exe -I. -pthread -lm
+        "$SCRIPT_DIR/main.c" \
+        "$ROOT_DIR/cgsme_ruleset.c" \
+        "$ROOT_DIR/cgsme_soft.c" \
+        "$ROOT_DIR/generator.c" \
+        "$ROOT_DIR/cgsme_debug.c" \
+        "$ROOT_DIR/cgsme_utils.c" \
+        "$ROOT_DIR/cgsme_noise.c" \
+        "$ROOT_DIR/cgsme_topology.c" \
+        "$ROOT_DIR/cgsme_solver.c" \
+        "$ROOT_DIR/tinycthread/tinycthread.c" \
+        -o "$SCRIPT_DIR/debug_gen.exe" -I"$ROOT_DIR" -pthread -lm
     if [ $? -ne 0 ]; then
         echo "Compilation Failed!"
         read -r -p "Press Enter to exit..."
@@ -68,16 +84,16 @@ if [ "$SOFT_MODE" -eq 1 ]; then
     echo "---------------------------------------------------"
     echo "0. Soft Mode Enabled (${TILESET_FILE}) - Skipping Codegen"
     echo "---------------------------------------------------"
-    if [ ! -f "cgsme_tileset_baked.h" ]; then
-        gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe \
-            && ./cgsme_codegen.exe "tileset.json" cgsme_tileset_baked.h
+    if [ ! -f "$ROOT_DIR/cgsme_tileset_baked.h" ]; then
+        gcc -std=c11 -O2 "$ROOT_DIR/cgsme_codegen.c" "$ROOT_DIR/cgsme_ruleset.c" -I"$ROOT_DIR" -o "$SCRIPT_DIR/cgsme_codegen.exe" \
+            && "$SCRIPT_DIR/cgsme_codegen.exe" "$ROOT_DIR/tileset.json" "$ROOT_DIR/cgsme_tileset_baked.h"
     fi
     NEEDS_COMPILE=0
-    if [ ! -x "./debug_gen.exe" ]; then
+    if [ ! -x "$SCRIPT_DIR/debug_gen.exe" ]; then
         NEEDS_COMPILE=1
     else
-        for src in *.c *.h tinycthread/*.c tinycthread/*.h; do
-            if [ -f "$src" ] && [ "$src" -nt "./debug_gen.exe" ]; then
+        for src in "$SCRIPT_DIR"/main.c "$ROOT_DIR"/*.c "$ROOT_DIR"/*.h "$ROOT_DIR"/tinycthread/*.c "$ROOT_DIR"/tinycthread/*.h; do
+            if [ -f "$src" ] && [ "$src" -nt "$SCRIPT_DIR/debug_gen.exe" ]; then
                 NEEDS_COMPILE=1
                 break
             fi
@@ -89,13 +105,13 @@ if [ "$SOFT_MODE" -eq 1 ]; then
     echo "---------------------------------------------------"
     echo "2. Running Generator (--soft ${TILESET_FILE})..."
     echo "---------------------------------------------------"
-    ./debug_gen.exe --cgsme-debug --soft "$TILESET_FILE" "${FORWARD_ARGS[@]}"
+    "$SCRIPT_DIR/debug_gen.exe" --cgsme-debug --soft "$TILESET_FILE" "${FORWARD_ARGS[@]}"
 else
     echo "---------------------------------------------------"
     echo "0. Baking ${TILESET_FILE} -> cgsme_tileset_baked.h..."
     echo "---------------------------------------------------"
-    gcc -std=c11 -O2 cgsme_codegen.c cgsme_ruleset.c -o cgsme_codegen.exe \
-        && ./cgsme_codegen.exe "$TILESET_FILE" cgsme_tileset_baked.h
+    gcc -std=c11 -O2 "$ROOT_DIR/cgsme_codegen.c" "$ROOT_DIR/cgsme_ruleset.c" -I"$ROOT_DIR" -o "$SCRIPT_DIR/cgsme_codegen.exe" \
+        && "$SCRIPT_DIR/cgsme_codegen.exe" "$TILESET_FILE" "$ROOT_DIR/cgsme_tileset_baked.h"
     if [ $? -ne 0 ]; then
         echo "Tileset baking failed!"
         read -r -p "Press Enter to exit..."
@@ -107,22 +123,15 @@ else
     echo "---------------------------------------------------"
     echo "2. Running Generator (Baked)..."
     echo "---------------------------------------------------"
-    ./debug_gen.exe --cgsme-debug "${FORWARD_ARGS[@]}"
+    "$SCRIPT_DIR/debug_gen.exe" --cgsme-debug "${FORWARD_ARGS[@]}"
 fi
 
 echo ""
-if [ -f "render_maze_png.py" ]; then
-    echo "---------------------------------------------------"
-    echo "2b. Rendering Map/Texture PNG (maze_texture.png)..."
-    echo "---------------------------------------------------"
-    python3 render_maze_png.py -i maze.txt -t "$TILESET_FILE" -o maze_texture.png
-    echo ""
-fi
 echo "---------------------------------------------------"
 echo "3. Launching Visualizer..."
 echo "---------------------------------------------------"
 
-CGSME_TILESET="$TILESET_FILE" love .
+CGSME_TILESET="$TILESET_FILE" love "$SCRIPT_DIR"
 
 echo "Done."
 
