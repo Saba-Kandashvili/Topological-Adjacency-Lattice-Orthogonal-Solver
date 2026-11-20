@@ -1,5 +1,5 @@
 // compiles the engine a second time with CGSME_SOFT_MODE=1 (uint64_t carrier + runtime json LUTs)
-// only linked into debug_gen, never into the shared lib
+// separate translation unit so baked generateGrid has zero runtime overhead
 
 #define CGSME_SOFT_MODE 1
 
@@ -84,7 +84,6 @@ const CgsmeRuleset *cgsme_soft_get_ruleset(void)
 
 #define w                                   w_Soft
 #define l                                   l_Soft
-#define printProgressBar                    printProgressBar_Soft
 #define runArchitect                        runArchitect_Soft
 #define generateLayerThread                 generateLayerThread_Soft
 #define generateGrid                        generateGrid_Soft

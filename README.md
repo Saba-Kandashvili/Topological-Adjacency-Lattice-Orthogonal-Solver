@@ -15,9 +15,9 @@ Fast, multithreaded 2D/3D Wave Function Collapse and maze topology engine writte
 Standard WFC fills a grid until it hits a contradiction and either backtracks exponentially or crashes, and it has no concept of global path connectivity. CGSME splits local constraint solving from global graph repair so generation runs in strict linear $O(V / P)$ time.
 
 ### 1. JSON Rulesets & Compile-Time Baking (`cgsme_codegen`)
-Tile rules, sockets (`N, E, S, W, U, D`), category spawn curves, and vertical area quotas are defined in [`tileset.json`](tileset.json).
+Tile rules, sockets (`N, E, S, W, U, D`), category spawn curves, and vertical area quotas are defined in [`tileset.json`](tileset.json) (a 63-tile 3D pipes example is also included in [`tilesets/pipes_3d_v1.json`](tilesets/pipes_3d_v1.json)).
 * **Baked Mode (`.dll` / `.so`):** At build time, `cgsme_codegen` pre-solves the socket graph into flat bitmask lookup tables (`CGSME_PROP_MASK`, `CGSME_VERT_PROP_MASK`, `CGSME_OPEN_LUT`, `CGSME_CLOSE_LUT`) in `cgsme_tileset_baked.h` and picks the smallest unsigned integer container (`uint8_t`, `uint16_t`, `uint32_t`, or `uint64_t`) that fits the tile count. Zero file I/O or JSON parsing at runtime.
-* **Soft Mode (`--soft`):** The standalone debug runner can also load any JSON ruleset at runtime using a universal `uint64_t` carrier with bit-for-bit identical output, so you can tweak rulesets and preview them without recompiling C.
+* **Soft Mode (`generateGrid_Soft` / `--soft`):** Compiles a second separate translation unit (`cgsme_soft.c`) using a universal `uint64_t` carrier so you can load any JSON ruleset at runtime with bit-for-bit identical output. Because it is a separate compilation unit with its own `_Soft` symbols, baked `generateGrid()` pays zero runtime overhead when you don't use soft mode.
 
 ### 2. Ridged Noise Masking & Cavity Pruning
 When `fulness < 100%`, the engine carves an organic silhouette before WFC runs:
@@ -45,6 +45,79 @@ After WFC finishes, disconnected regions are welded into a single 100%-traversab
 
 ---
 
+## Writing Your Own Tileset JSON
+
+Look at [`tileset.json`](tileset.json) (2.5D corridors with stairs) and [`tilesets/pipes_3d_v1.json`](tilesets/pipes_3d_v1.json) (63-tile 3D pipes) for full working examples.
+
+**Hard engine limits:** max `64` tiles, `16` sockets, `16` categories, `8` vertical area quotas.
+
+A ruleset has 5 top-level sections:
+
+```json
+{
+  "name": "my_tileset",
+  "dimensions": 3,
+  "sockets": {
+    "WALL":       { "open": false, "allow_void": true,  "compatible": ["WALL"] },
+    "OPEN":       { "open": true,  "allow_void": false, "compatible": ["OPEN"] },
+    "CEIL_SOLID": { "open": false, "allow_void": true,  "compatible": ["FLOOR_SOLID", "FLOOR_X"] },
+    "FLOOR_SOLID":{ "open": false, "allow_void": true,  "compatible": ["CEIL_SOLID"] },
+    "STAIR_UP":   { "open": true,  "allow_void": false, "compatible": ["FLOOR_X"] },
+    "FLOOR_X":    { "open": false, "allow_void": true,  "compatible": ["CEIL_SOLID", "STAIR_UP"] }
+  },
+  "categories": [
+    { "name": "HUB",    "curve_pos": 0.0, "mask_weight": 0.10, "connector_boost": false, "natural_spawn": true },
+    { "name": "HALL",   "curve_pos": 2.0, "mask_weight": 0.80, "connector_boost": true,  "natural_spawn": true },
+    { "name": "DEAD",   "curve_pos": 4.0, "mask_weight": 0.10, "connector_boost": false, "natural_spawn": true },
+    { "name": "STAIRS", "curve_pos": 0.0, "mask_weight": 0.00, "connector_boost": false, "natural_spawn": false }
+  ],
+  "gaussian_config": { "gauss_width": 2.0, "connector_boost": 2.5 },
+  "vertical_rules": {
+    "seed_tile": "Hub_4Way",
+    "default_up_socket": "CEIL_SOLID",
+    "default_down_socket": "FLOOR_SOLID",
+    "guarantee_layer_connection": true,
+    "area_quotas": [
+      {
+        "tile": "Stairs_Up",
+        "area_size": 20,
+        "count_per_area": 1,
+        "min_per_layer": 2,
+        "min_spacing": 2,
+        "allow_stacking": false
+      }
+    ]
+  },
+  "tiles": [
+    { "id": 0, "name": "Hub_4Way",  "category": "HUB",    "ports": { "N": "OPEN", "E": "OPEN", "S": "OPEN", "W": "OPEN", "D": "FLOOR_X" }, "weld_target": true },
+    { "id": 1, "name": "Stairs_Up", "category": "STAIRS", "ports": { "N": "OPEN", "E": "OPEN", "S": "OPEN", "W": "OPEN", "U": "STAIR_UP" }, "weld_target": false }
+  ]
+}
+```
+
+What each part controls:
+* **`sockets`**:
+  * `open`: `true` if traversable/weldable by the Ariadne welder, `false` for solid walls/terrain.
+  * `allow_void`: `true` if this face is allowed to touch Void (`0`) or the outer edges of the grid (top ceiling, bottom floor, perimeter). Defaults to `!open`.
+  * `compatible`: list of socket names this socket can connect to on the neighboring tile's opposite face (`N<->S`, `E<->W`, `U<->D`).
+* **`categories` & `gaussian_config`**:
+  * `curve_pos`: position along the Gaussian pacing sweep used in `100%` Ocean Mode (smaller values spawn earlier near seeds, larger values spawn later toward edges).
+  * `mask_weight`: fixed spawn weight used in `< 100%` Mask Mode (and for multi-socket or 3D-pipe tilesets).
+  * `connector_boost`: if `true`, gets an extra weight boost early in Ocean Mode that fades out as the grid fills.
+  * `natural_spawn`: set to `false` for quota-only tiles like stairs so WFC never spawns them randomly.
+* **`vertical_rules`**:
+  * `seed_tile`: preferred starting tile when seeding a chunk or layer center.
+  * `default_up_socket` / `default_down_socket`: default `U` and `D` sockets applied to any tile that omits them in `ports`.
+  * `guarantee_layer_connection`: if `true`, forces at least one vertical connector between every pair of layers `z` and `z + 1` even on sparse noise masks.
+  * `area_quotas`: places `count_per_area` copies of `tile` inside every `area_size x area_size` sector (with at least `min_per_layer` per floor, `min_spacing` cells apart, and optional `allow_stacking`).
+* **`tiles`**:
+  * `id`: unique `0 .. N-1` bit index (tile value in the returned grid is `1 << id`).
+  * `ports`: socket names for `N, E, S, W` and optional `U, D`.
+  * `weld_target`: defaults to `true`. Set to `false` on special/quota tiles so the welder never morphs a normal corridor into a staircase.
+* **2-socket vs. multi-socket rulesets:** Rulesets with `<= 2` distinct horizontal sockets (e.g. `WALL` + `OPEN` mazes and 3D pipes) automatically run the **4-Color Checkerboard 3D Column Pool + Ariadne Welder** for 100% connectivity. Rulesets with `> 2` horizontal sockets (e.g. terrain/castle/texture Wang tiles) run AC-3 union propagation with local patch backtracking instead of corridor welding.
+
+---
+
 ## Build
 
 Requires a C11 compiler and CMake 3.15+. `tinycthread` is bundled in the repo.
@@ -56,31 +129,37 @@ cmake ..
 cmake --build .
 ```
 
-To bake a custom JSON tileset into the shared library at build time:
-
-```bash
-cmake .. -DCGSME_TILESET_FILE=path/to/your_tileset.json
-cmake --build .
-```
+CMake options:
+* `-DCGSME_TILESET_FILE=path/to/custom.json`: bake a different JSON tileset into the shared library at build time (default: `tileset.json`)
+* `-DCGSME_ENABLE_SOFT=ON|OFF`: include the runtime `--soft` JSON API (`cgsme_soft_load_ruleset` / `generateGrid_Soft`) in the shared library (default: `ON`, zero performance impact on baked `generateGrid`)
+* `-DCGSME_BUILD_CLI=ON`: also build the standalone `debug_gen` CLI executable
+* `-DCGSME_BUILD_TESTS=ON`: build the verification & benchmark test suite (`cgsme_tests`, runnable via `ctest`)
 
 ---
 
 ## C API & Bindings
 
-`generateGrid` returns a 3D array `grid[z][y][x]` of `cgsme_tile_t` (`uint16_t` for the default 16-tile ruleset). `0` (`Empty_Tile`) is Void; any non-zero value is a single set bit (`1 << tile_id`).
+`generateGrid` returns a 3D array `grid[z][y][x]` of `cgsme_tile_t` (`uint16_t` for the default 16-tile ruleset). `0` (`Empty_Tile`) is Void; any non-zero value is a single set bit (`1 << tile_id`). All cells live in one contiguous flat buffer starting at `grid[0][0]`.
 
-### C
+### C (Baked & Runtime Soft Mode)
 ```c
 #include "generator.h"
+#include "cgsme_soft.h" // only needed if loading JSON at runtime
 
-uint32_t width = 50, length = 50, height = 5;
-uint32_t seed = 12345, fullness = 70;
-
-cgsme_tile_t ***map = generateGrid(width, length, height, seed, fullness);
+// Baked mode (zero runtime overhead, uses tileset baked at build time)
+cgsme_tile_t ***map = generateGrid(50, 50, 5, 12345, 70);
 if (map) {
     cgsme_tile_t tile = map[0][10][10];
-    // use map...
-    freeGrid(map, width, length, height);
+    freeGrid(map, 50, 50, 5);
+}
+
+// Soft mode (load any JSON ruleset at runtime into a uint64_t grid)
+if (cgsme_soft_load_ruleset("tilesets/pipes_3d_v1.json")) {
+    uint64_t ***pipes = generateGrid_Soft(25, 25, 6, 42, 70);
+    if (pipes) {
+        uint64_t tile = pipes[0][10][10];
+        freeGrid_Soft(pipes, 25, 25, 6);
+    }
 }
 ```
 
@@ -103,7 +182,7 @@ public class MazeGen
         IntPtr gridPtr = generateGrid(w, l, h, 12345, 70);
         if (gridPtr != IntPtr.Zero)
         {
-            // unmarshal IntPtr layers/rows to ushort[,,]
+            // unmarshal IntPtr layers/rows (or read flat buffer at grid[0][0]) to ushort[,,]
             freeGrid(gridPtr, w, l, h);
         }
     }
@@ -132,15 +211,20 @@ lib.freeGrid(grid, w, l, h)
 
 ## Debug Runner & LÖVE2D 3D Visualizer (`debug/`)
 
-The [`debug/`](debug) folder contains the standalone CLI runner (`debug/main.c`) and a LÖVE2D visualizer (`debug/main.lua`) with both a 2D layer slice view and an interactive 3D orbit view + 3D flood-fill reachability checker.
+The [`debug/`](debug) folder contains the standalone CLI runner (`debug/main.c`) and a LÖVE2D visualizer (`debug/main.lua`) with both a 2D slice view and an interactive 3D orbit view + 3D flood-fill reachability checker.
 
 ```bash
-# Compile baked mode, generate maze.txt, and open the visualizer
+# Baked default tileset (25x25x10, seed 5, 70% fullness)
 ./debug/debug.sh
 
-# Run in --soft mode with any custom JSON ruleset (no C recompile needed)
-./debug/debug.sh --soft path/to/tileset.json
+# Custom dimensions, seed, and fullness
+./debug/debug.sh --size 60x60x5 --seed 42 --fullness 80
+
+# Soft mode with the 63-tile 3D pipes ruleset (no C recompile needed)
+./debug/debug.sh --soft tilesets/pipes_3d_v1.json --size 25x25x6 --seed 5 -f 70
 ```
+
+CLI flags: `--size WxLxH` (or `-w`, `-l`, `-z`/`--layers`), `--seed N|random`, `-f`/`--fullness N`, `-s`/`--soft PATH`, `-d`/`--cgsme-debug`, `--cgsme-debug-quick`, `--help`.
 
 **Visualizer Controls:**
 * `V` / `3`: Toggle 3D Orbit View / 2D Slice View (LMB drag to orbit, RMB drag to pan, wheel to zoom)
@@ -153,7 +237,19 @@ The [`debug/`](debug) folder contains the standalone CLI runner (`debug/main.c`)
 
 ---
 
-## Performance & Complexity
+## Tests & Benchmarks (`tests/`)
+
+[`tests/test_cgsme.c`](tests/test_cgsme.c) verifies Baked vs. Soft bit-for-bit parity, 2D/3D socket validity, 6-face Void closure, stair alignment, and 100% 3D flood-fill reachability across `100%`, `70%`, and `45%` fullness on both `tileset.json` and `tilesets/pipes_3d_v1.json`.
+
+Run via CMake (`-DCGSME_BUILD_TESTS=ON` + `ctest`) or directly with `gcc`:
+
+```bash
+gcc -std=c11 -O3 -D_GNU_SOURCE tests/test_cgsme.c generator.c cgsme_debug.c cgsme_utils.c cgsme_noise.c cgsme_topology.c cgsme_solver.c cgsme_ruleset.c cgsme_soft.c tinycthread/tinycthread.c -I. -Itinycthread -lm -lpthread -o cgsme_tests
+./cgsme_tests          # full 5-seed benchmark + verification
+./cgsme_tests --quick  # 1-seed fast sanity check
+```
+
+### Performance & Complexity
 
 * **Time Complexity:** $\Theta(V / P)$ linear in total grid volume $V = W \cdot L \cdot H$ across $P$ worker threads.
 * **Memory Complexity:** $\Theta(V)$ total ($2\text{ bytes/cell}$ in 16-tile Baked mode = `~408 KB` grid for `200,000` cells), with chunk-scoped heaps ($\sim 160\text{ KB/thread}$) that stay in L2 cache.

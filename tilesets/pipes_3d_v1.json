@@ -1,0 +1,976 @@
+{
+  "name": "pipes_3d_v1",
+  "dimensions": 3,
+  "tile_mock_fallback": false,
+  "traversal_overlay": true,
+  "sockets": {
+    "WALL": {
+      "open": false,
+      "allow_void": true,
+      "compatible": [
+        "WALL"
+      ],
+      "color": "#1E293B"
+    },
+    "OPEN": {
+      "open": true,
+      "allow_void": false,
+      "compatible": [
+        "OPEN"
+      ],
+      "color": "#94A3B8"
+    }
+  },
+  "categories": [
+    {
+      "name": "PIPE_3D_VERT",
+      "curve_pos": 0.5,
+      "mask_weight": 0.24,
+      "connector_boost": true,
+      "natural_spawn": true,
+      "color": "#E09F3E"
+    },
+    {
+      "name": "ELBOW_2D",
+      "curve_pos": 1.2,
+      "mask_weight": 0.24,
+      "connector_boost": true,
+      "natural_spawn": true,
+      "color": "#78869B"
+    },
+    {
+      "name": "STRAIGHT_2D",
+      "curve_pos": 1.8,
+      "mask_weight": 0.22,
+      "connector_boost": true,
+      "natural_spawn": true,
+      "color": "#64748B"
+    },
+    {
+      "name": "TEE_2D",
+      "curve_pos": 2.4,
+      "mask_weight": 0.1,
+      "connector_boost": false,
+      "natural_spawn": true,
+      "color": "#5C8D89"
+    },
+    {
+      "name": "TEE_3D",
+      "curve_pos": 2.6,
+      "mask_weight": 0.12,
+      "connector_boost": false,
+      "natural_spawn": true,
+      "color": "#38A3A5"
+    },
+    {
+      "name": "CROSS_3D",
+      "curve_pos": 3.2,
+      "mask_weight": 0.04,
+      "connector_boost": false,
+      "natural_spawn": true,
+      "color": "#6C7A9C"
+    },
+    {
+      "name": "END_CAP",
+      "curve_pos": 4.0,
+      "mask_weight": 0.04,
+      "connector_boost": false,
+      "natural_spawn": true,
+      "color": "#475569"
+    }
+  ],
+  "gaussian_config": {
+    "gauss_width": 1.8,
+    "connector_boost": 2.5
+  },
+  "vertical_rules": {
+    "seed_tile": "Pipe_Hub_6Way",
+    "default_up_socket": "WALL",
+    "default_down_socket": "WALL",
+    "guarantee_layer_connection": true
+  },
+  "tiles": [
+    {
+      "name": "Pipe_Straight_NS",
+      "category": "STRAIGHT_2D",
+      "color": "#64748B",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 0
+    },
+    {
+      "name": "Pipe_Straight_EW",
+      "category": "STRAIGHT_2D",
+      "color": "#64748B",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 1
+    },
+    {
+      "name": "Pipe_Elbow_NE",
+      "category": "ELBOW_2D",
+      "color": "#78869B",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 2
+    },
+    {
+      "name": "Pipe_Elbow_SE",
+      "category": "ELBOW_2D",
+      "color": "#78869B",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 3
+    },
+    {
+      "name": "Pipe_Elbow_SW",
+      "category": "ELBOW_2D",
+      "color": "#78869B",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 4
+    },
+    {
+      "name": "Pipe_Elbow_NW",
+      "category": "ELBOW_2D",
+      "color": "#78869B",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 5
+    },
+    {
+      "name": "Pipe_Vertical_UD",
+      "category": "PIPE_3D_VERT",
+      "color": "#E09F3E",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 6
+    },
+    {
+      "name": "Pipe_Up_North",
+      "category": "PIPE_3D_VERT",
+      "color": "#E09F3E",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 7
+    },
+    {
+      "name": "Pipe_Up_East",
+      "category": "PIPE_3D_VERT",
+      "color": "#E09F3E",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 8
+    },
+    {
+      "name": "Pipe_Up_South",
+      "category": "PIPE_3D_VERT",
+      "color": "#E09F3E",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 9
+    },
+    {
+      "name": "Pipe_Up_West",
+      "category": "PIPE_3D_VERT",
+      "color": "#E09F3E",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 10
+    },
+    {
+      "name": "Pipe_Down_North",
+      "category": "PIPE_3D_VERT",
+      "color": "#D48C2E",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 11
+    },
+    {
+      "name": "Pipe_Down_East",
+      "category": "PIPE_3D_VERT",
+      "color": "#D48C2E",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 12
+    },
+    {
+      "name": "Pipe_Down_South",
+      "category": "PIPE_3D_VERT",
+      "color": "#D48C2E",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 13
+    },
+    {
+      "name": "Pipe_Down_West",
+      "category": "PIPE_3D_VERT",
+      "color": "#D48C2E",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 14
+    },
+    {
+      "name": "Pipe_Tee_NEW",
+      "category": "TEE_2D",
+      "color": "#5C8D89",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 15
+    },
+    {
+      "name": "Pipe_Tee_NES",
+      "category": "TEE_2D",
+      "color": "#5C8D89",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 16
+    },
+    {
+      "name": "Pipe_Tee_ESW",
+      "category": "TEE_2D",
+      "color": "#5C8D89",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 17
+    },
+    {
+      "name": "Pipe_Tee_NSW",
+      "category": "TEE_2D",
+      "color": "#5C8D89",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 18
+    },
+    {
+      "name": "Pipe_NEU",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 19
+    },
+    {
+      "name": "Pipe_NSU",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 20
+    },
+    {
+      "name": "Pipe_ESU",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 21
+    },
+    {
+      "name": "Pipe_NWU",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 22
+    },
+    {
+      "name": "Pipe_EWU",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 23
+    },
+    {
+      "name": "Pipe_SWU",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 24
+    },
+    {
+      "name": "Pipe_NED",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 25
+    },
+    {
+      "name": "Pipe_NSD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 26
+    },
+    {
+      "name": "Pipe_ESD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 27
+    },
+    {
+      "name": "Pipe_NWD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 28
+    },
+    {
+      "name": "Pipe_EWD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 29
+    },
+    {
+      "name": "Pipe_SWD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 30
+    },
+    {
+      "name": "Pipe_NUD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 31
+    },
+    {
+      "name": "Pipe_EUD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 32
+    },
+    {
+      "name": "Pipe_SUD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 33
+    },
+    {
+      "name": "Pipe_WUD",
+      "category": "TEE_3D",
+      "color": "#38A3A5",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 34
+    },
+    {
+      "name": "Pipe_Cross_NESW",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 35
+    },
+    {
+      "name": "Pipe_NESU",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 36
+    },
+    {
+      "name": "Pipe_NEWU",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 37
+    },
+    {
+      "name": "Pipe_NSWU",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 38
+    },
+    {
+      "name": "Pipe_ESWU",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 39
+    },
+    {
+      "name": "Pipe_NESWU",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 40
+    },
+    {
+      "name": "Pipe_NESD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 41
+    },
+    {
+      "name": "Pipe_NEWD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 42
+    },
+    {
+      "name": "Pipe_NSWD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 43
+    },
+    {
+      "name": "Pipe_ESWD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 44
+    },
+    {
+      "name": "Pipe_NESWD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 45
+    },
+    {
+      "name": "Pipe_NEUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 46
+    },
+    {
+      "name": "Pipe_NSUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 47
+    },
+    {
+      "name": "Pipe_ESUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 48
+    },
+    {
+      "name": "Pipe_NESUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 49
+    },
+    {
+      "name": "Pipe_NWUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 50
+    },
+    {
+      "name": "Pipe_EWUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 51
+    },
+    {
+      "name": "Pipe_NEWUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 52
+    },
+    {
+      "name": "Pipe_SWUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 53
+    },
+    {
+      "name": "Pipe_NSWUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 54
+    },
+    {
+      "name": "Pipe_ESWUD",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 55
+    },
+    {
+      "name": "Pipe_Hub_6Way",
+      "category": "CROSS_3D",
+      "color": "#6C7A9C",
+      "ports": {
+        "N": "OPEN",
+        "E": "OPEN",
+        "S": "OPEN",
+        "W": "OPEN",
+        "U": "OPEN",
+        "D": "OPEN"
+      },
+      "id": 56
+    },
+    {
+      "name": "Pipe_Cap_North",
+      "category": "END_CAP",
+      "color": "#475569",
+      "ports": {
+        "N": "OPEN",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 57
+    },
+    {
+      "name": "Pipe_Cap_East",
+      "category": "END_CAP",
+      "color": "#475569",
+      "ports": {
+        "N": "WALL",
+        "E": "OPEN",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 58
+    },
+    {
+      "name": "Pipe_Cap_South",
+      "category": "END_CAP",
+      "color": "#475569",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "OPEN",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 59
+    },
+    {
+      "name": "Pipe_Cap_West",
+      "category": "END_CAP",
+      "color": "#475569",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "OPEN",
+        "U": "WALL",
+        "D": "WALL"
+      },
+      "id": 60
+    },
+    {
+      "name": "Pipe_Cap_Up",
+      "category": "END_CAP",
+      "color": "#475569",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "OPEN",
+        "D": "WALL"
+      },
+      "id": 61
+    },
+    {
+      "name": "Pipe_Cap_Down",
+      "category": "END_CAP",
+      "color": "#475569",
+      "ports": {
+        "N": "WALL",
+        "E": "WALL",
+        "S": "WALL",
+        "W": "WALL",
+        "U": "WALL",
+        "D": "OPEN"
+      },
+      "id": 62
+    }
+  ]
+}

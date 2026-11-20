@@ -13,6 +13,14 @@ set "FORWARD_ARGS="
 
 :parse_args
 if "%~1"=="" goto done_args
+if /I "%~1"=="--help" (
+    echo usage: debug\debug.bat [--soft path\to\tileset.json] [--size WxLxH] [-w N] [-l N] [-z N] [--seed N^|random] [-f N]
+    exit /b 0
+)
+if /I "%~1"=="-h" (
+    echo usage: debug\debug.bat [--soft path\to\tileset.json] [--size WxLxH] [-w N] [-l N] [-z N] [--seed N^|random] [-f N]
+    exit /b 0
+)
 if /I "%~1"=="--soft" (
     set "SOFT_MODE=1"
     if not "%~2"=="" (

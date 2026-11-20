@@ -212,6 +212,17 @@ void cgsme_profile_record(const char *name, uint64_t elapsed_us, uint64_t elapse
     mtx_unlock(&g_logmtx);
 }
 
+static int profile_entry_cmp(const void *a, const void *b)
+{
+    const ProfileEntry *pa = (const ProfileEntry *)a;
+    const ProfileEntry *pb = (const ProfileEntry *)b;
+    if (pa->total_cycles != pb->total_cycles)
+        return (pa->total_cycles < pb->total_cycles) ? 1 : -1;
+    if (pa->total_us != pb->total_us)
+        return (pa->total_us < pb->total_us) ? 1 : -1;
+    return 0;
+}
+
 void cgsme_shutdown_debug(void)
 {
     if (!g_logmtx_active)
@@ -236,17 +247,7 @@ void cgsme_shutdown_debug(void)
         {
             for (size_t i = 0; i < g_profile_count; ++i)
                 arr[i] = g_profiles[i];
-            int cmp(const void *a, const void *b)
-            {
-                const ProfileEntry *pa = (const ProfileEntry *)a;
-                const ProfileEntry *pb = (const ProfileEntry *)b;
-                if (pa->total_cycles != pb->total_cycles)
-                    return (pa->total_cycles < pb->total_cycles) ? 1 : -1;
-                if (pa->total_us != pb->total_us)
-                    return (pa->total_us < pb->total_us) ? 1 : -1;
-                return 0;
-            }
-            qsort(arr, g_profile_count, sizeof(ProfileEntry), cmp);
+            qsort(arr, g_profile_count, sizeof(ProfileEntry), profile_entry_cmp);
 
             // table header
             fprintf(g_logfile, "%-30s %10s %12s %8s %8s %8s %14s %12s %12s %12s %8s\n",

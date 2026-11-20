@@ -12,11 +12,14 @@ cgsme_codegen
 cgsme_codegen.exe
 debug_gen
 debug_gen.exe
+cgsme_tests
+cgsme_tests.exe
 maze.txt
 debug_mask.txt
 debug_noise.txt
 *.dll
 *.so
 *.dylib
-tilesets/
+tilesets/*
+!tilesets/pipes_3d_v1.json
 maze_texture.png

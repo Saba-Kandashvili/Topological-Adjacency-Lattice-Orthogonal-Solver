@@ -23,6 +23,10 @@ FORWARD_ARGS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --help|-h)
+            echo "usage: ./debug/debug.sh [--soft path/to/tileset.json] [--size WxLxH] [-w N] [-l N] [-z N] [--seed N|random] [-f N]"
+            exit 0
+            ;;
         --soft|-s)
             SOFT_MODE=1
             if [ $# -gt 1 ] && [[ "$2" == *.json ]]; then
