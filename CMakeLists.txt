@@ -18,7 +18,9 @@ set(CGSME_TILESET_FILE "${CMAKE_CURRENT_SOURCE_DIR}/tileset.json"
     CACHE FILEPATH "Path to the tileset JSON ruleset baked into C at build time")
 get_filename_component(CGSME_TILESET_ABS "${CGSME_TILESET_FILE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
+option(CGSME_ENABLE_SOFT "Include runtime JSON (--soft) API in the shared library" ON)
 option(CGSME_BUILD_CLI "Build the standalone debug_gen CLI executable" OFF)
+option(CGSME_BUILD_TESTS "Build the verification and benchmark test runner" OFF)
 
 # build-time tileset codegen
 set(CGSME_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -96,7 +98,15 @@ set(CGSME_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/tinycthread/tinycthread.c"
 )
 
-add_library(${PROJECT_NAME} SHARED ${CGSME_SOURCES} "${CGSME_BAKED_HEADER}")
+set(CGSME_LIB_SOURCES ${CGSME_SOURCES})
+if(CGSME_ENABLE_SOFT)
+    list(APPEND CGSME_LIB_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_ruleset.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_soft.c"
+    )
+endif()
+
+add_library(${PROJECT_NAME} SHARED ${CGSME_LIB_SOURCES} "${CGSME_BAKED_HEADER}")
 add_dependencies(${PROJECT_NAME} cgsme_bake)
 
 # put generated header dir first so old headers in repo root dont shadow it
@@ -171,4 +181,37 @@ if(CGSME_BUILD_CLI)
     if(MINGW)
         target_link_options(debug_gen PRIVATE -static -static-libgcc)
     endif()
+endif()
+
+# optional test & benchmark suite
+if(CGSME_BUILD_TESTS)
+    enable_testing()
+    add_executable(cgsme_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cgsme.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_ruleset.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cgsme_soft.c"
+        ${CGSME_SOURCES}
+        "${CGSME_BAKED_HEADER}"
+    )
+    add_dependencies(cgsme_tests cgsme_bake)
+    target_include_directories(cgsme_tests BEFORE PRIVATE "${CGSME_GENERATED_DIR}")
+    target_include_directories(cgsme_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tinycthread"
+    )
+    target_compile_definitions(cgsme_tests PRIVATE CGSME_USE_CMAKE_BAKED)
+    if(NOT WIN32)
+        target_compile_definitions(cgsme_tests PRIVATE _GNU_SOURCE)
+        target_link_libraries(cgsme_tests PRIVATE Threads::Threads)
+        if(CGSME_MATH_LIBRARY)
+            target_link_libraries(cgsme_tests PRIVATE "${CGSME_MATH_LIBRARY}")
+        endif()
+    endif()
+    if(MSVC)
+        target_compile_definitions(cgsme_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
+    if(MINGW)
+        target_link_options(cgsme_tests PRIVATE -static -static-libgcc)
+    endif()
+    add_test(NAME cgsme_suite COMMAND cgsme_tests --quick WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

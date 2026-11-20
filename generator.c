@@ -50,27 +50,6 @@ void freeGrid(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t he
 // worker thread for single layer
 int generateLayerThread(void *args);
 
-
-void printProgressBar(int percentage)
-{
-    CGSME_PROFILE_FUNC(); // bugg
-    int barWidth = 70;    // Width of the progress bar
-    printf("[");
-    int pos = barWidth * percentage / 100;
-    for (int i = 0; i < barWidth; ++i)
-    {
-        if (i < pos)
-            printf("=");
-        else if (i == pos)
-            printf(">");
-        else
-            printf(" ");
-    }
-
-    printf("] %d %%\r", percentage);
-    fflush(stdout);
-}
-
 // EDGE FIXUP LOGIC
 
 
