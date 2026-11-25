@@ -3,16 +3,16 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include "tiles.h" // talos_tile_t
 
-void collapseTile(uint16_t *tile, float *rates, uint32_t *rng);
-uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness);
+void collapseTile(talos_tile_t *tile, float *rates, uint32_t *rng);
+talos_tile_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness);
 
-void freeGrid(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height);
-
+void freeGrid(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height);
 
 typedef struct layerGenerationArgs
 {
-    uint16_t **gridLayer;
+    talos_tile_t **gridLayer;
     uint32_t width;
     uint32_t length;
     int32_t startX;
@@ -23,9 +23,5 @@ typedef struct layerGenerationArgs
     uint8_t fulness;
     uint8_t layerIndex;
 } layerGenerationArgs;
-
-
-
-
 
 #endif

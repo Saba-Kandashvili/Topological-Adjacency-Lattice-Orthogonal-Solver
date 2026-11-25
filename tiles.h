@@ -2,312 +2,66 @@
 #define __TILES__
 
 #include <stdint.h>
-
-/*naming convention
-
-
-	2 openning Corridors are namded based on the position of their opennings on the cardinal directions
-
-	Vertical Direction comes first , then horizontal direction
-
-	so for instance a corridor like this would be named
-
-	 @
-	 @@
-
-	 North_East_Corridor
-
-	 in the case of T Corridors it will be named on the differring openning direction name
-	 so for instance
-
-	  @
-	 @@@
-
-	 will be named North_T_Corridor
-
-
-	int the case of 4 openning X corridor it can be either Normal or sending
-
-	Normal
-	 @
-	@@@
-	 @
-
-	Sending
-
-	 @!
-	@@@
-	 @
-
-	deadEnds Will be named based on their openning direction
-
-	for instance
-
-	@@
-
-	will be Named West_DeadEnd
-
-	 each Corridor has its own asscoicated bit
-	 a cell will be considered collapsed when there is only 1 bit left in it
-*/
-
-#define Empty_Tile (uint16_t)0
-
-// Internal flags for direction manipulation (N=1, E=2, S=4, W=8)
-#define DIR_N 1
-#define DIR_E 2
-#define DIR_S 4
-#define DIR_W 8
-
-// L type Corridors
+#include <stdbool.h>
 
 /*
- @
- @@
+	tile definitions now come from tileset.json
 
+	talos_codegen reads tileset.json and writes talos_tileset_baked.h, which contains:
+	  - talos_tile_t        (uint8_t / uint16_t / uint32_t / uint64_t, picked from the tile count)
+	  - Empty_Tile, All_Possible_State
+	  - one macro per tile  (North_East_Corridor, Normal_X_Corridor, ... = TALOS_BIT(id))
+	  - TALOS_HAS_PORT_MASK, TALOS_PROP_MASK, TALOS_OPEN_LUT, TALOS_CLOSE_LUT
+	  - category tables     (TALOS_BIT_TO_CATEGORY, TALOS_CATEGORY_*)
+	  - architect anchors   (TALOS_ANCHOR_*)
+
+	DO NOT edit talos_tileset_baked.h by hand, edit tileset.json and re-run talos_codegen
 */
-
-#define North_East_Corridor 1
-
-/*
-
- @@
- @
-*/
-
-#define South_East_Corridor 1 << 1
-
-/*
-
-@@
- @
-*/
-
-#define South_West_Corridor 1 << 2
-
-/*
- @
-@@
-
-*/
-
-#define North_West_Corridor 1 << 3
-
-// I type Corridors
-
-/*
- @
- @
- @
-*/
-
-#define North_South_Corridor 1 << 4
-
-/*
-
-@@@
-
-*/
-
-#define West_East_Corridor 1 << 5
-
-// T type Corridors
-
-/*
- @
-@@@
-
-*/
-
-#define North_T_Corridor 1 << 6
-
-/*
- @
- @@
- @
-*/
-
-#define East_T_Corridor 1 << 7
-
-/*
-
-@@@
- @
-*/
-
-#define South_T_Corridor 1 << 8
-
-/*
- @
-@@
- @
-*/
-
-#define West_T_Corridor 1 << 9
-
-// X corridors
-
-/*
- @
-@@@
- @
-*/
-
-#define Normal_X_Corridor 1 << 10
-
-/*
- @!
-@@@
- @
-*/
-
-#define Special_X_Corridor 1 << 11
-
-// deadends
-
-/*
- @
- @
-
-*/
-
-#define North_DeadEnd 1 << 12
-
-/*
-
- @@
-
-*/
-
-#define East_DeadEnd 1 << 13
-
-/*
-
- @
- @
-*/
-
-#define South_DeadEnd 1 << 14
-
-/*
-
-@@
-
-*/
-
-#define West_DeadEnd 1 << 15
-
-// 1000000000000000
-// 000000000000000 are free to use for reguion marking
-
-/*
-	Bit masks for collapsing
-
-	we will have 8 bitmasks in total , 2 per direction , one open and one closed
-
-	Naming convention will be Direction_Open/Closed_Mask
-*/
-
-#define North_Open_Mask (uint16_t)(South_East_Corridor | North_South_Corridor | South_West_Corridor | South_DeadEnd | Normal_X_Corridor | Special_X_Corridor | South_T_Corridor | East_T_Corridor | West_T_Corridor)
-
-#define East_Open_Mask (uint16_t)(North_West_Corridor | South_West_Corridor | West_East_Corridor | West_DeadEnd | Normal_X_Corridor | Special_X_Corridor | South_T_Corridor | West_T_Corridor | North_T_Corridor)
-
-#define South_Open_Mask (uint16_t)(North_West_Corridor | North_South_Corridor | North_East_Corridor | North_DeadEnd | Normal_X_Corridor | Special_X_Corridor | North_T_Corridor | West_T_Corridor | East_T_Corridor)
-
-#define West_Open_Mask (uint16_t)(North_East_Corridor | South_East_Corridor | West_East_Corridor | East_DeadEnd | Normal_X_Corridor | Special_X_Corridor | East_T_Corridor | South_T_Corridor | North_T_Corridor)
-
-#define North_Closed_Mask (uint16_t)(~North_Open_Mask)
-
-#define East_Closed_Mask (uint16_t)(~East_Open_Mask)
-
-#define South_Closed_Mask (uint16_t)(~South_Open_Mask)
-
-#define West_Closed_Mask (uint16_t)(~West_Open_Mask)
-
-// intial state
-
-#define All_Possible_State (uint16_t)-1
-
-// valid tiles for forced conncetions
-// West_East_Corridor | South_T_Corridor | North_T_Corridor | Special_X_Corridor | Normal_X_Corridor;
-
-#define West_East_Valid_Tiles (uint16_t)(Normal_X_Corridor | Special_X_Corridor | South_T_Corridor | North_T_Corridor | West_East_Corridor)
-#define North_South_Valid_Tiles (uint16_t)(Normal_X_Corridor | Special_X_Corridor | East_T_Corridor | West_T_Corridor | North_South_Corridor)
-
-// gauss dist configuration
-#define NUM_TILE_TYPES 6
-
-static inline bool isValidSingleTile(uint16_t t)
+#ifdef TALOS_SOFT_MODE
+#include "talos_soft.h"
+#elif defined(TALOS_USE_CMAKE_BAKED)
+#include <talos_tileset_baked.h>
+#else
+#include "talos_tileset_baked.h"
+#endif
+
+#ifndef TALOS_MAX_CATEGORIES
+#define TALOS_MAX_CATEGORIES 16
+#endif
+
+#ifndef TALOS_NUM_SOCKETS
+#define TALOS_NUM_SOCKETS 2
+#endif
+
+// standardized direction indices used to index every LUT (0=N, 1=E, 2=S, 3=W, 4=U, 5=D)
+#ifndef DIR_IDX_N
+#define DIR_IDX_N 0
+#define DIR_IDX_E 1
+#define DIR_IDX_S 2
+#define DIR_IDX_W 3
+#define DIR_IDX_U 4
+#define DIR_IDX_D 5
+#endif
+
+#ifndef VERT_IDX_UP
+#define VERT_IDX_UP   0
+#define VERT_IDX_DOWN 1
+#endif
+
+#ifndef DIR_OPPOSITE
+#define DIR_OPPOSITE(d) (((d) + 2) & 3)
+#endif
+
+// mask -> index (position of the single set bit)
+static inline uint8_t maskToIndex(talos_tile_t mask)
 {
-	if (t == Empty_Tile)
-		return false;
-	// mask containing all defined single-bit tiles
-	const uint16_t ALL_TILES =
-		North_East_Corridor | South_East_Corridor | South_West_Corridor | North_West_Corridor |
-		North_South_Corridor | West_East_Corridor |
-		North_T_Corridor | East_T_Corridor | South_T_Corridor | West_T_Corridor |
-		Normal_X_Corridor | Special_X_Corridor |
-		North_DeadEnd | East_DeadEnd | South_DeadEnd | West_DeadEnd;
-	// ensure it's a single bit and belongs to the known set
-	return (t & (t - 1)) == 0 && (t & ALL_TILES) != 0;
+	return (mask == Empty_Tile) ? 0 : (uint8_t)TALOS_CTZ(mask);
 }
 
-//  (0-15) -> bitmask
-// map the 16 valid single-tile types to numbers 0-15.
-static const uint16_t TILE_INDEX_TO_MASK[16] = {
-	North_East_Corridor, South_East_Corridor, South_West_Corridor, North_West_Corridor, // 0-3
-	North_South_Corridor, West_East_Corridor,											// 4-5
-	North_T_Corridor, East_T_Corridor, South_T_Corridor, West_T_Corridor,				// 6-9
-	Normal_X_Corridor, Special_X_Corridor,												// 10-11
-	North_DeadEnd, East_DeadEnd, South_DeadEnd, West_DeadEnd							// 12-15
-};
-
-// mask -> index
-// This uses a switch for safety, but the compiler optimizes it to a lookup.
-static inline uint8_t maskToIndex(uint16_t mask)
+// index -> mask
+static inline talos_tile_t indexToMask(uint8_t index)
 {
-	switch (mask)
-	{
-	case North_East_Corridor:
-		return 0;
-	case South_East_Corridor:
-		return 1;
-	case South_West_Corridor:
-		return 2;
-	case North_West_Corridor:
-		return 3;
-	case North_South_Corridor:
-		return 4;
-	case West_East_Corridor:
-		return 5;
-	case North_T_Corridor:
-		return 6;
-	case East_T_Corridor:
-		return 7;
-	case South_T_Corridor:
-		return 8;
-	case West_T_Corridor:
-		return 9;
-	case Normal_X_Corridor:
-		return 10;
-	case Special_X_Corridor:
-		return 11;
-	case North_DeadEnd:
-		return 12;
-	case East_DeadEnd:
-		return 13;
-	case South_DeadEnd:
-		return 14;
-	case West_DeadEnd:
-		return 15;
-	default:
-		return 0; // should handle EMPTY elsewhere
-	}
-}
-
-static inline uint16_t indexToMask(uint8_t index)
-{
-	return TILE_INDEX_TO_MASK[index & 0xF];
+	return TALOS_BIT(index);
 }
 
 #endif

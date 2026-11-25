@@ -1,6 +1,6 @@
-#include "cgsme_utils.h"
-#include "cgsme_debug.h"
-#include "cgsme_solver.h"
+#include "talos_utils.h"
+#include "talos_debug.h"
+#include "talos_solver.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -36,7 +36,7 @@ void q_free(Queue2D *q)
 
 MinHeap *initHeap(uint32_t width, uint32_t length)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	MinHeap *h = malloc(sizeof(MinHeap));
 	h->capacity = width * length; // Worst case: everything added
 	h->count = 0;
@@ -54,7 +54,7 @@ MinHeap *initHeap(uint32_t width, uint32_t length)
 
 void freeHeap(MinHeap *h)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	free(h->nodes);
 	free(h->indexMap);
 	free(h);
@@ -62,12 +62,12 @@ void freeHeap(MinHeap *h)
 
 void swapNodes(MinHeap *h, uint32_t i, uint32_t j)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	HeapNode temp = h->nodes[i];
 	h->nodes[i] = h->nodes[j];
 	h->nodes[j] = temp;
 
-	// Update the lookup map!
+	// update lookup map
 	uint32_t idx_i = h->nodes[i].y * h->width + h->nodes[i].x;
 	uint32_t idx_j = h->nodes[j].y * h->width + h->nodes[j].x;
 	h->indexMap[idx_i] = i;
@@ -76,7 +76,7 @@ void swapNodes(MinHeap *h, uint32_t i, uint32_t j)
 
 void bubbleUp(MinHeap *h, uint32_t index)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	while (index > 0)
 	{
 		uint32_t parent = (index - 1) / 2;
@@ -94,7 +94,7 @@ void bubbleUp(MinHeap *h, uint32_t index)
 
 void bubbleDown(MinHeap *h, uint32_t index)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	while (true)
 	{
 		uint32_t left = 2 * index + 1;
@@ -119,9 +119,9 @@ void bubbleDown(MinHeap *h, uint32_t index)
 }
 
 // Adds a node or Updates it if it already exists
-void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, float **distMap, uint32_t *rng)
+void heapInsertOrUpdate(MinHeap *h, talos_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	uint32_t mapIdx = y * h->width + x;
 	int32_t currentHeapIdx = h->indexMap[mapIdx];
 
@@ -129,7 +129,7 @@ void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, flo
 	if (x >= h->width || y >= h->length)
 		return;
 	// don't add collapsed tiles (1 bit) or broken tiles (0 bits)
-	if (__builtin_popcount(grid[y][x]) <= 1)
+	if (TALOS_POPCOUNT(grid[y][x]) <= 1)
 	{
 		// IF it was in heap, remove it (lazy removal happens on pop usually, but we can do logic here if strictly needed)
 		// for WFC, typically once collapsed we just ignore it.
@@ -138,16 +138,20 @@ void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, flo
 	}
 
 	// Calculate fresh score
-	float score = calculateScore(grid, x, y, distMap, rng);
+	float score = calculateScore(grid, x, y, rng);
 
 	if (currentHeapIdx != -1)
 	{
-		// ALREADY IN HEAP: Update score
-		// entropy only ever decreases, so score only decreases. just bubble up.
+		// already in heap, update score and rebalance
 		if (score < h->nodes[currentHeapIdx].score)
 		{
 			h->nodes[currentHeapIdx].score = score;
 			bubbleUp(h, currentHeapIdx);
+		}
+		else if (score > h->nodes[currentHeapIdx].score)
+		{
+			h->nodes[currentHeapIdx].score = score;
+			bubbleDown(h, currentHeapIdx);
 		}
 	}
 	else
@@ -164,9 +168,9 @@ void heapInsertOrUpdate(MinHeap *h, uint16_t **grid, uint32_t x, uint32_t y, flo
 }
 
 // returns true if valid node found, false if empty
-bool heapPop(MinHeap *h, uint16_t **grid, uint32_t *outX, uint32_t *outY)
+bool heapPop(MinHeap *h, talos_tile_t **grid, uint32_t *outX, uint32_t *outY)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	while (h->count > 0)
 	{
 		// take top
@@ -181,16 +185,14 @@ bool heapPop(MinHeap *h, uint16_t **grid, uint32_t *outX, uint32_t *outY)
 		if (h->count > 0)
 			bubbleDown(h, 0);
 
-		// validation: actually uncollapsed?
-		// it's possible we added it to heap, then later it got collapsed by something else?
-		// (Unlikely in single thread, but good safety).
-		if (__builtin_popcount(grid[top.y][top.x]) > 1)
+		// unlikely in single thread, but good safety to check if its been added to the heap adn then later collapsed by something else. (or if it was added to heap, then later collapsed by a neighbor update)
+		if (TALOS_POPCOUNT(grid[top.y][top.x]) > 1)		
 		{
 			*outX = top.x;
 			*outY = top.y;
 			return true;
 		}
-		// IF not valid, loop again (Lazy Deletion)
+		// IF not valid loop again (lazy deletion)
 	}
 	return false;
 }

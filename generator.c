@@ -3,135 +3,309 @@
 #include <time.h>
 #include <stdbool.h>
 #include <stdio.h>
+#if !defined(__STDC_NO_ATOMICS__) && !defined(_MSC_VER)
+#include <stdatomic.h>
+#define TALOS_HAS_C11_ATOMICS 1
+#endif
+#ifndef _MSC_VER
 #include <sys/param.h>
+#endif
 #include <math.h>
 
 #include "threadRandom.h"
 #include "generator.h"
-#include "cgsme_debug.h"
+#include "talos_debug.h"
 #include "tiles.h"
 #include "tinycthread/tinycthread.h"
-#include "cgsme_utils.h"
-#include "cgsme_noise.h"
-#include "cgsme_topology.h"
-#include "cgsme_solver.h"
+#include "talos_utils.h"
+#include "talos_noise.h"
+#include "talos_topology.h"
+#include "talos_solver.h"
 
 #ifndef __linux__
 #define MAX(a, b) ((a) > (b) ? a : b)
 #define MIN(a, b) ((a) < (b) ? a : b)
 #endif
 
-uint16_t ***globalGrid;
 uint32_t w, l;
 
-/// Generate a 3D grid using Wave Function Collapse (WFC).
+/// generate a 3D grid using wfc
 ///
-/// Parameters:
-///     width   - number of columns per layer.
-///     length  - number of rows per layer.
-///     height  - number of layers.
-///     seed    - RNG seed used to initialize per-thread RNGs.
-///     fulness - target percentage (0-100) of tiles to collapse; a minimum
-///               collapsed count is enforced by the implementation.
+/// parameters:
+///     width - number of columns per layer
+///     length - number of rows per layer
+///     height - number of layers
+///     seed - RNG seed used to initialize per thread RNGs
+///     fulness - target percentage (0-100) of tiles to collapse; a minimum collapsed count is enforced by the implementation
 ///
-/// Returns:
-///     Pointer to a newly-allocated 3D grid. The return value is an array of
-///     `height` pointers to layers; each layer is an array of `length` row
-///     pointers and each row contains `width` `uint16_t` entries. The caller
-///     owns the returned memory and must free it with `freeGrid(grid, width,
-///     length, height)`.
+/// returns:
+///     pointer to a newly allocated 3D grid. The return value is an array of `height` pointers to layers; each layer is an array of `length` row
+///     pointers and each row contains `width` `talos_tile_t` entries. The caller owns the returned memory and must free it with `freeGrid(grid, width, length, height)`
 ///
-/// Behavior / Notes:
-///     - Allocates memory with `malloc` for the top-level array, each layer,
-///       and each row, then spawns one thread per layer via `thrd_create` to
-///       run `generateLayerThread`.
-///     - The function currently does not perform robust malloc error handling;
-///       partial allocation may lead to undefined behavior if memory allocation
-///       fails.
-uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness);
 
-/// Free a grid previously returned by `generateGrid`.
-///
-/// Parameters:
-///     grid   - pointer returned by `generateGrid`.
-///     width  - width used when allocating.
-///     length - length used when allocating.
-///     height - height used when allocating.
-///
-/// Behavior / Notes:
-///     - Frees row arrays, then layer arrays, then the top-level grid pointer.
-///     - Expects the same dimensions used to allocate; passing a NULL pointer
-///       or mismatched dimensions is undefined (the function does not check
-///       for NULL in the current implementation).
-void freeGrid(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height);
-// Helper executed on a worker thread to generate a single layer.
-// Parameters:
-//     args - pointer to a `layerGenerationArgs` struct (defined in generator.h).
-// Returns:
-//     thrd-compatible int (thread return code). Populates the provided
-//     `gridLayer` inside `args` and uses a per-thread RNG seeded from
-//     `args->seed`.
+talos_tile_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness);
+
+// frees grid from generateGrid
+void freeGrid(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height);
+// worker thread for single layer
 int generateLayerThread(void *args);
-
-/// Clean reachable tiles starting from (x,y) inside a single layer.
-///
-/// Parameters:
-///     gridLayer - pointer to the layer (2D array indexed as [y][x]).
-///     width     - number of columns.
-///     length    - number of rows.
-///     x, y      - starting coordinates for the cleaning flood-fill.
-///
-/// Behavior:
-///     - Performs a recursive flood-fill over tiles reachable from (x,y) by
-///       following open connections (uses directional masks such as
-///       `North_Open_Mask`).
-///     - Marks visited tiles by inverting their bits in-place (the
-///       implementation flips bits to indicate visitation).
-///     - Performs bounds checks and stops at tiles that are already
-///       multi-state (popcount > 1) or outside the grid.
-void cleanGrid(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y);
-
-void printProgressBar(int percentage)
-{
-    CGSME_PROFILE_FUNC(); // bugg
-    int barWidth = 70;    // Width of the progress bar
-    printf("[");
-    int pos = barWidth * percentage / 100;
-    for (int i = 0; i < barWidth; ++i)
-    {
-        if (i < pos)
-            printf("=");
-        else if (i == pos)
-            printf(">");
-        else
-            printf(" ");
-    }
-
-    printf("] %d %%\r", percentage);
-    fflush(stdout);
-}
 
 // EDGE FIXUP LOGIC
 
-// Internal flags for direction manipulation (N=1, E=2, S=4, W=8)
-#define DIR_N 1
-#define DIR_E 2
-#define DIR_S 4
-#define DIR_W 8
 
-// ARCHITECT LOGIC (pre-seeding)
-// runs purely on the main thread before any threads are spawned
-void runArchitect(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t fulness, uint32_t seed)
+static inline talos_tile_t talosHasAnyOpenPort(void)
 {
-    CGSME_PROFILE_FUNC();
+    return TALOS_HAS_PORT_MASK[DIR_IDX_N] | TALOS_HAS_PORT_MASK[DIR_IDX_E] |
+           TALOS_HAS_PORT_MASK[DIR_IDX_S] | TALOS_HAS_PORT_MASK[DIR_IDX_W];
+}
 
-    // because of calloc the grid is already initialized to Empty_Tile (0)
+static inline bool talosHasVoidRestrictions(void)
+{
+    return (TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_N] != All_Possible_State) ||
+           (TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_E] != All_Possible_State) ||
+           (TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_S] != All_Possible_State) ||
+           (TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_W] != All_Possible_State);
+}
 
-    // generate Mask (Ridged Noise + Sanitize + Rescue)
+static inline uint8_t layerVoidOobMask4(talos_tile_t **layer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
+{
+    uint8_t voidDirs = 0;
+    if (y == 0 || layer[y - 1][x] == Empty_Tile)
+        voidDirs |= (1u << DIR_IDX_N);
+    if (x + 1 >= width || layer[y][x + 1] == Empty_Tile)
+        voidDirs |= (1u << DIR_IDX_E);
+    if (y + 1 >= length || layer[y + 1][x] == Empty_Tile)
+        voidDirs |= (1u << DIR_IDX_S);
+    if (x == 0 || layer[y][x - 1] == Empty_Tile)
+        voidDirs |= (1u << DIR_IDX_W);
+    return voidDirs;
+}
+
+static bool tileFitsVoidAndOob(talos_tile_t **layer, uint32_t width, uint32_t length, uint32_t x, uint32_t y, talos_tile_t tileMask)
+{
+    if ((y == 0 || layer[y - 1][x] == Empty_Tile) && !(tileMask & TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_S]))
+        return false;
+    if ((x + 1 >= width || layer[y][x + 1] == Empty_Tile) && !(tileMask & TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_W]))
+        return false;
+    if ((y + 1 >= length || layer[y + 1][x] == Empty_Tile) && !(tileMask & TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_N]))
+        return false;
+    if ((x == 0 || layer[y][x - 1] == Empty_Tile) && !(tileMask & TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_E]))
+        return false;
+    return true;
+}
+
+// remove mask cells that cant fit any valid tile against void/edges
+static void pruneUnfillableMaskCells(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height)
+{
+    if (!talosHasVoidRestrictions())
+        return;
+
+    uint8_t validByVoid[16];
+    bool allValid = true;
+    for (uint8_t v = 0; v < 16; v++)
+    {
+        talos_tile_t cand = All_Possible_State;
+        for (int d = 0; d < 4; d++)
+        {
+            if (v & (1u << d))
+                cand &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_OPPOSITE(d)];
+        }
+        validByVoid[v] = (cand != Empty_Tile) ? 1u : 0u;
+        if (!validByVoid[v])
+            allValid = false;
+    }
+    if (allValid)
+        return;
+
+    uint32_t total = width * length;
+    Point2D *q = NULL;
+    uint8_t *inQ = NULL;
+
+    static const int32_t dx[4] = { 0, 1, 0, -1 };
+    static const int32_t dy[4] = { -1, 0, 1, 0 };
+
+    uint32_t head = 0, tail = 0, count = 0;
+    for (uint32_t y = 0; y < length; y++)
+    {
+        for (uint32_t x = 0; x < width; x++)
+        {
+            if (grid[0][y][x] != Empty_Tile && !validByVoid[layerVoidOobMask4(grid[0], width, length, x, y)])
+            {
+                if (!q)
+                {
+                    q = malloc(sizeof(Point2D) * total);
+                    inQ = calloc(total, sizeof(uint8_t));
+                    if (!q || !inQ)
+                    {
+                        free(q);
+                        free(inQ);
+                        return;
+                    }
+                }
+                q[tail++] = (Point2D){ (int32_t)x, (int32_t)y };
+                if (tail == total)
+                    tail = 0;
+                count++;
+                inQ[y * width + x] = 1;
+            }
+        }
+    }
+
+    if (!q)
+        return;
+
+    while (count > 0)
+    {
+        Point2D c = q[head++];
+        if (head == total)
+            head = 0;
+        count--;
+        inQ[(uint32_t)c.y * width + (uint32_t)c.x] = 0;
+
+        if (grid[0][c.y][c.x] == Empty_Tile)
+            continue;
+        if (validByVoid[layerVoidOobMask4(grid[0], width, length, (uint32_t)c.x, (uint32_t)c.y)])
+            continue;
+
+        for (uint32_t z = 0; z < height; z++)
+            grid[z][c.y][c.x] = Empty_Tile;
+
+        for (int d = 0; d < 4; d++)
+        {
+            int32_t nx = c.x + dx[d];
+            int32_t ny = c.y + dy[d];
+            if (nx < 0 || ny < 0 || (uint32_t)nx >= width || (uint32_t)ny >= length)
+                continue;
+            uint32_t nFlat = (uint32_t)ny * width + (uint32_t)nx;
+            if (grid[0][ny][nx] != Empty_Tile && !inQ[nFlat])
+            {
+                q[tail++] = (Point2D){ nx, ny };
+                if (tail == total)
+                    tail = 0;
+                count++;
+                inQ[nFlat] = 1;
+            }
+        }
+    }
+
+    free(q);
+    free(inQ);
+}
+
+static void clampPerimeterCell(talos_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
+{
+    if (TALOS_POPCOUNT(gridLayer[y][x]) <= 1)
+        return;
+
+    talos_tile_t cand = gridLayer[y][x];
+    if (y == 0)
+        cand &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_S];
+    if (y == length - 1)
+        cand &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_N];
+    if (x == 0)
+        cand &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_E];
+    if (x == width - 1)
+        cand &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_W];
+    gridLayer[y][x] = cand;
+}
+
+static bool canPlaceQuotaTileAt(
+    talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+    uint32_t z, uint32_t x, uint32_t y,
+    talos_tile_t lowerTile, talos_tile_t upMask, talos_tile_t downMask,
+    int32_t spacing, bool allowStacking)
+{
+    if (x < 1 || y < 1 || x + 1 >= width || y + 1 >= length)
+        return false;
+
+    talos_tile_t cur = grid[z][y][x];
+    if (cur == Empty_Tile || TALOS_POPCOUNT(cur) == 1 || (cur & lowerTile) == Empty_Tile)
+        return false;
+
+    if (!tileFitsVoidAndOob(grid[z], width, length, x, y, lowerTile))
+        return false;
+
+    if (z + 1 < height)
+    {
+        talos_tile_t above = grid[z + 1][y][x];
+        talos_tile_t candUp = above & upMask;
+        if (above == Empty_Tile || TALOS_POPCOUNT(above) == 1 || candUp == Empty_Tile)
+            return false;
+
+        bool anyUpFits = false;
+        for (talos_tile_t tmp = candUp; tmp != 0; tmp &= (tmp - 1))
+        {
+            talos_tile_t b = TALOS_BIT(TALOS_CTZ(tmp));
+            if (tileFitsVoidAndOob(grid[z + 1], width, length, x, y, b))
+            {
+                anyUpFits = true;
+                break;
+            }
+        }
+        if (!anyUpFits)
+            return false;
+    }
+
+    if (z > 0)
+    {
+        talos_tile_t below = grid[z - 1][y][x];
+        if (!allowStacking && below == lowerTile)
+            return false;
+        if (below != Empty_Tile && (below & downMask) == Empty_Tile)
+            return false;
+    }
+
+    int32_t r = (spacing > 0) ? spacing : 1;
+    for (int32_t dy = -r; dy <= r; dy++)
+    {
+        for (int32_t dx = -r; dx <= r; dx++)
+        {
+            int32_t nx = (int32_t)x + dx;
+            int32_t ny = (int32_t)y + dy;
+            if (nx < 0 || ny < 0 || (uint32_t)nx >= width || (uint32_t)ny >= length)
+            {
+                if (dy >= -1 && dy <= 1 && dx >= -1 && dx <= 1)
+                    return false;
+                continue;
+            }
+            if (dy >= -1 && dy <= 1 && dx >= -1 && dx <= 1)
+            {
+                if (grid[z][ny][nx] == Empty_Tile || (z + 1 < height && grid[z + 1][ny][nx] == Empty_Tile))
+                    return false;
+            }
+            if (grid[z][ny][nx] != Empty_Tile && TALOS_POPCOUNT(grid[z][ny][nx]) == 1)
+                return false;
+            if (z + 1 < height && grid[z + 1][ny][nx] != Empty_Tile && TALOS_POPCOUNT(grid[z + 1][ny][nx]) == 1)
+                return false;
+        }
+    }
+
+    return true;
+}
+
+static void applyQuotaTileAt(
+    talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+    uint32_t z, uint32_t x, uint32_t y,
+    talos_tile_t lowerTile, talos_tile_t upMask, talos_tile_t downMask)
+{
+    (void)width;
+    (void)length;
+    grid[z][y][x] = lowerTile;
+    if (z + 1 < height)
+        grid[z + 1][y][x] &= upMask;
+    if (z > 0 && grid[z - 1][y][x] != Empty_Tile)
+        grid[z - 1][y][x] &= downMask;
+}
+
+// architect: mask setup + nxn area quota pre-seeding before threads start
+void runArchitect(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t fulness, uint32_t seed)
+{
+    TALOS_PROFILE_FUNC();
+
+    uint32_t rngState = seed;
+
     if (fulness < 100)
     {
-        // the generator will write All_Possible_State (65535)
-        // to valid locations. everything else stays 0
         generateRidgedMask(grid, width, length, height, fulness, seed);
     }
     else
@@ -142,51 +316,247 @@ void runArchitect(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t he
                     grid[z][y][x] = All_Possible_State;
     }
 
-    // place stairs
-    int stairsPerLayer = (width * length) / 400;
-    if (stairsPerLayer < 2)
-        stairsPerLayer = 2;
+    pruneUnfillableMaskCells(grid, width, length, height);
 
-    for (uint32_t z = 0; z < height - 1; z++)
+    if (talosHasVoidRestrictions())
     {
-        int placedCount = 0;
-        int attempts = 0;
-        int maxAttempts = stairsPerLayer * 20;
-
-        while (placedCount < stairsPerLayer && attempts < maxAttempts)
+        for (uint32_t z = 0; z < height; z++)
         {
-            attempts++;
-            int x = rand() % width;
-            int y = rand() % length;
+            for (uint32_t x = 0; x < width; x++)
+            {
+                clampPerimeterCell(grid[z], width, length, x, 0);
+                if (length > 1)
+                    clampPerimeterCell(grid[z], width, length, x, length - 1);
+            }
+            for (uint32_t y = 1; y + 1 < length; y++)
+            {
+                clampPerimeterCell(grid[z], width, length, 0, y);
+                if (width > 1)
+                    clampPerimeterCell(grid[z], width, length, width - 1, y);
+            }
+        }
+    }
 
-            // bounds
-            if (x < 1 || y < 1 || x >= width - 1 || y >= length - 1)
-                continue;
+    if (height > 1)
+    {
+        talos_tile_t bottomMask = TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_UP];
+        talos_tile_t topMask    = TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_DOWN];
+        for (uint32_t y = 0; y < length; y++)
+        {
+            for (uint32_t x = 0; x < width; x++)
+            {
+                if (grid[0][y][x] != Empty_Tile)
+                    grid[0][y][x] &= bottomMask;
+                if (grid[height - 1][y][x] != Empty_Tile)
+                    grid[height - 1][y][x] &= topMask;
+            }
+        }
+    }
 
-            // VOID CHECK must be on valid land
-            if (grid[z][y][x] == Empty_Tile)
-                continue;
+    // nxn area quota placement + layer connectivity
+    for (int a = 0; a < TALOS_NUM_ANCHORS; a++)
+    {
+        uint8_t lowerIdx = TALOS_ANCHOR_LOWER[a];
+        talos_tile_t lowerTile = TALOS_BIT(lowerIdx);
+        talos_tile_t upMask    = TALOS_VERT_PROP_MASK[lowerIdx][VERT_IDX_UP];
+        talos_tile_t downMask  = TALOS_VERT_PROP_MASK[lowerIdx][VERT_IDX_DOWN];
+        uint32_t areaSize      = (TALOS_ANCHOR_AREA_SIZE[a] >= 4) ? TALOS_ANCHOR_AREA_SIZE[a] : 20u;
+        uint32_t countPerArea  = TALOS_ANCHOR_COUNT_PER_AREA[a];
+        uint32_t minPerLayer   = TALOS_ANCHOR_MIN[a];
+        int32_t  spacing       = (int32_t)TALOS_ANCHOR_SPACING[a];
+        bool     allowStacking = TALOS_ANCHOR_ALLOW_STACKING[a];
 
-            // occupancy
-            if (grid[z][y][x] != All_Possible_State)
-                continue;
+        uint32_t anchorLayers = (height > 1) ? (height - 1) : ((talosHasAnyOpenPort() == Empty_Tile) ? 1u : 0u);
+        if (height > 1 && (TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_DOWN] & lowerTile) != Empty_Tile && talosHasAnyOpenPort() == Empty_Tile)
+            anchorLayers = height;
 
-            // anti-stacking
-            if (z > 0 && grid[z - 1][y][x] == Special_X_Corridor)
-                continue;
+        uint32_t areasX = (width + areaSize - 1) / areaSize;
+        uint32_t areasY = (length + areaSize - 1) / areaSize;
 
-            grid[z][y][x] = Special_X_Corridor;    // stairs up
-            grid[z + 1][y][x] = Normal_X_Corridor; // receiver hole
-            placedCount++;
+        for (uint32_t z = 0; z < anchorLayers; z++)
+        {
+            int placedOnLayer = 0;
+
+            // per area placement
+            for (uint32_t ay = 0; ay < areasY; ay++)
+            {
+                uint32_t y0 = ay * areaSize;
+                uint32_t y1 = (y0 + areaSize < length) ? (y0 + areaSize - 1) : (length - 1);
+                if (y0 < 1) y0 = 1;
+                if (y1 >= length - 1) y1 = length - 2;
+                if (y0 > y1) continue;
+
+                for (uint32_t ax = 0; ax < areasX; ax++)
+                {
+                    uint32_t x0 = ax * areaSize;
+                    uint32_t x1 = (x0 + areaSize < width) ? (x0 + areaSize - 1) : (width - 1);
+                    if (x0 < 1) x0 = 1;
+                    if (x1 >= width - 1) x1 = width - 2;
+                    if (x0 > x1) continue;
+
+                    uint32_t spanX = x1 - x0 + 1;
+                    uint32_t spanY = y1 - y0 + 1;
+
+                    for (uint32_t k = 0; k < countPerArea; k++)
+                    {
+                        bool placedOne = false;
+                        for (int attempt = 0; attempt < 20; attempt++)
+                        {
+                            uint32_t rx = x0 + (nextRandom(&rngState) % spanX);
+                            uint32_t ry = y0 + (nextRandom(&rngState) % spanY);
+                            if (canPlaceQuotaTileAt(grid, width, length, height, z, rx, ry, lowerTile, upMask, downMask, spacing, allowStacking))
+                            {
+                                applyQuotaTileAt(grid, width, length, height, z, rx, ry, lowerTile, upMask, downMask);
+                                placedOnLayer++;
+                                placedOne = true;
+                                break;
+                            }
+                        }
+
+                        if (!placedOne)
+                        {
+                            // fallback scan over valid spots in this area
+                            uint32_t seenValid = 0;
+                            uint32_t pickX = 0, pickY = 0;
+                            for (uint32_t sy = y0; sy <= y1; sy++)
+                            {
+                                for (uint32_t sx = x0; sx <= x1; sx++)
+                                {
+                                    if (canPlaceQuotaTileAt(grid, width, length, height, z, sx, sy, lowerTile, upMask, downMask, spacing, allowStacking))
+                                    {
+                                        seenValid++;
+                                        if ((nextRandom(&rngState) % seenValid) == 0)
+                                        {
+                                            pickX = sx;
+                                            pickY = sy;
+                                        }
+                                    }
+                                }
+                            }
+                            if (seenValid > 0)
+                            {
+                                applyQuotaTileAt(grid, width, length, height, z, pickX, pickY, lowerTile, upMask, downMask);
+                                placedOnLayer++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // fallback to hit min_per_layer
+            while (placedOnLayer < (int)minPerLayer)
+            {
+                uint32_t seenValid = 0;
+                uint32_t pickX = 0, pickY = 0;
+                int32_t fallbackSpacing = (spacing > 1) ? 1 : spacing;
+                for (uint32_t sy = 1; sy + 1 < length; sy++)
+                {
+                    for (uint32_t sx = 1; sx + 1 < width; sx++)
+                    {
+                        if (canPlaceQuotaTileAt(grid, width, length, height, z, sx, sy, lowerTile, upMask, downMask, fallbackSpacing, allowStacking))
+                        {
+                            seenValid++;
+                            if ((nextRandom(&rngState) % seenValid) == 0)
+                            {
+                                pickX = sx;
+                                pickY = sy;
+                            }
+                        }
+                    }
+                }
+                if (seenValid > 0)
+                {
+                    applyQuotaTileAt(grid, width, length, height, z, pickX, pickY, lowerTile, upMask, downMask);
+                    placedOnLayer++;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // if 0 connectors placed between z and z+1, force a 3x3 pad so layers still connect
+            if (placedOnLayer == 0 && TALOS_GUARANTEE_LAYER_CONN && z + 1 < height && width >= 4 && length >= 4)
+            {
+                uint32_t bx = width / 2;
+                uint32_t by = length / 2;
+                bool foundPad = false;
+                for (uint32_t sy = 2; sy + 2 < length && !foundPad; sy++)
+                {
+                    for (uint32_t sx = 2; sx + 2 < width; sx++)
+                    {
+                        if (grid[z][sy][sx] != Empty_Tile || grid[z + 1][sy][sx] != Empty_Tile)
+                        {
+                            if (z == 0 || allowStacking || grid[z - 1][sy][sx] != lowerTile)
+                            {
+                                bx = sx;
+                                by = sy;
+                                foundPad = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                for (int32_t dy = -1; dy <= 1; dy++)
+                {
+                    for (int32_t dx = -1; dx <= 1; dx++)
+                    {
+                        uint32_t nx = (uint32_t)((int32_t)bx + dx);
+                        uint32_t ny = (uint32_t)((int32_t)by + dy);
+                        if (grid[z][ny][nx] == Empty_Tile)
+                            grid[z][ny][nx] = All_Possible_State;
+                        if (grid[z + 1][ny][nx] == Empty_Tile)
+                            grid[z + 1][ny][nx] = All_Possible_State;
+                    }
+                }
+                applyQuotaTileAt(grid, width, length, height, z, bx, by, lowerTile, upMask, downMask);
+            }
+        }
+    }
+
+    // remove non-natural tiles from uncollapsed cells so wfc wont spawn them
+    talos_tile_t naturalMask = Empty_Tile;
+    for (int t = 0; t < TALOS_NUM_TILES; t++)
+    {
+        if (TALOS_CATEGORY_NATURAL[TALOS_BIT_TO_CATEGORY[t]])
+            naturalMask |= TALOS_BIT(t);
+    }
+    if (naturalMask != Empty_Tile && naturalMask != All_Possible_State)
+    {
+        for (uint32_t z = 0; z < height; z++)
+        {
+            for (uint32_t y = 0; y < length; y++)
+            {
+                for (uint32_t x = 0; x < width; x++)
+                {
+                    if (TALOS_POPCOUNT(grid[z][y][x]) > 1)
+                        grid[z][y][x] &= naturalMask;
+                }
+            }
         }
     }
 }
 
+static int countCollapsedCells(talos_tile_t **gridLayer, uint32_t width, uint32_t length)
+{
+    int count = 0;
+    for (uint32_t y = 0; y < length; y++)
+    {
+        for (uint32_t x = 0; x < width; x++)
+        {
+            if (gridLayer[y][x] != Empty_Tile && TALOS_POPCOUNT(gridLayer[y][x]) == 1)
+                count++;
+        }
+    }
+    return count;
+}
+
+
 int generateLayerThread(void *args)
 {
-    CGSME_PROFILE_FUNC();
+    TALOS_PROFILE_FUNC();
     layerGenerationArgs *arg = (layerGenerationArgs *)args;
-    uint16_t **gridLayer = arg->gridLayer;
+    talos_tile_t **gridLayer = arg->gridLayer;
     uint32_t width = arg->width;
     uint32_t length = arg->length;
     int32_t startX = arg->startX;
@@ -196,27 +566,49 @@ int generateLayerThread(void *args)
 
     uint32_t rngState = seed;
 
-    // --- WEIGHTS CONFIGURATION ---
-    float current_spawnrates[NUM_TILE_TYPES];
-    if (fulness < 100)
+    talos_tile_t anyOpen = talosHasAnyOpenPort();
+    talos_tile_t allPortTiles = TALOS_HAS_PORT_MASK[0] | TALOS_HAS_PORT_MASK[1] |
+                                TALOS_HAS_PORT_MASK[2] | TALOS_HAS_PORT_MASK[3];
+    bool hasZeroPortTiles = ((All_Possible_State & ~allPortTiles) != Empty_Tile);
+
+    // WEIGHTS CONFIGURATION
+    float current_spawnrates[TALOS_MAX_CATEGORIES];
+    if (fulness < 100 || anyOpen == Empty_Tile)
     {
-        // MASK MODE: Prioritize connectivity (L, T, I) over Dead Ends
-        current_spawnrates[0] = 0.05f; // Normal X
-        current_spawnrates[1] = 0.20f; // T
-        current_spawnrates[2] = 0.40f; // L
-        current_spawnrates[3] = 0.30f; // I
-        current_spawnrates[4] = 0.05f; // D (Very Low)
-        current_spawnrates[5] = 0.0f;  // Special X
+        // mask mode: use mask_weight from json
+        for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
+            current_spawnrates[i] = TALOS_CATEGORY_MASK_WEIGHT[i];
     }
     else
     {
-        // OCEAN MODE: Uniform start
-        for (int i = 0; i < NUM_TILE_TYPES; ++i)
-            current_spawnrates[i] = 1.0f / (float)NUM_TILE_TYPES;
+        // ocean mode: uniform start across natural categories
+        int naturalCount = 0;
+        for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
+            if (TALOS_CATEGORY_NATURAL[i])
+                naturalCount++;
+
+        for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
+            current_spawnrates[i] = (TALOS_CATEGORY_NATURAL[i] && naturalCount > 0) ? (1.0f / (float)naturalCount) : 0.0f;
     }
 
-    // --- EXACT TARGET COUNTING ---
-    // Count exact mask size
+    if (talosHasVoidRestrictions())
+    {
+        for (uint32_t x = 0; x < width; x++)
+        {
+            clampPerimeterCell(gridLayer, width, length, x, 0);
+            if (length > 1)
+                clampPerimeterCell(gridLayer, width, length, x, length - 1);
+        }
+        for (uint32_t y = 1; y + 1 < length; y++)
+        {
+            clampPerimeterCell(gridLayer, width, length, 0, y);
+            if (width > 1)
+                clampPerimeterCell(gridLayer, width, length, width - 1, y);
+        }
+    }
+
+    // EXACT TARGET COUNTING
+    // exact mask size
     int target_collapsed_count = 0;
     for (uint32_t y = 0; y < length; y++)
     {
@@ -229,72 +621,56 @@ int generateLayerThread(void *args)
 
     int valid_collapsed_count = 0;
 
-    // 1. DISTANCE MAP (Initialized to 0 if Mask Mode to prevent bias, or standard calculation)
-    float **distMap = malloc(sizeof(float *) * length);
-    for (uint32_t i = 0; i < length; i++)
-    {
-        distMap[i] = malloc(sizeof(float) * width);
-        for (uint32_t j = 0; j < width; j++)
-        {
-            // If Mask Mode, we don't want center-bias, we want mask-bias.
-            // If Ocean Mode, we use center bias.
-            if (fulness < 100)
-                distMap[i][j] = 0.0f;
-            else
-                distMap[i][j] = sqrtf(powf((float)j - startX, 2) + powf((float)i - startY, 2));
-        }
-    }
-
     MinHeap *heap = initHeap(width, length);
 
-    // 2. INIT & CONSTRAINT PROPAGATION
+    // INIT and CONSTRAINT PROPAGATION
     for (uint32_t i = 0; i < length; i++)
     {
         for (uint32_t j = 0; j < width; j++)
         {
-            if (gridLayer[i][j] == Empty_Tile)
+            if (gridLayer[i][j] == Empty_Tile || TALOS_POPCOUNT(gridLayer[i][j]) == 1)
             {
-                // Mask Void: Tell neighbors "I am a wall"
-                updateNeighbours(gridLayer, width, length, j, i, heap, distMap, &rngState);
-            }
-            else if (__builtin_popcount(gridLayer[i][j]) == 1)
-            {
-                // Pre-placed Stairs: Propagate constraints
-                valid_collapsed_count++;
-                updateNeighbours(gridLayer, width, length, j, i, heap, distMap, &rngState);
+                // Void cells and preplaced anchors propagate constraints to neighbors
+                updateNeighbours(gridLayer, width, length, j, i, heap, &rngState);
             }
         }
     }
 
-    // 3. SEED CENTER (If valid)
-    if (gridLayer[startY][startX] != Empty_Tile && __builtin_popcount(gridLayer[startY][startX]) > 1)
+    valid_collapsed_count = countCollapsedCells(gridLayer, width, length);
+
+    // SEED CENTER (if valid)
+    if (gridLayer[startY][startX] != Empty_Tile && TALOS_POPCOUNT(gridLayer[startY][startX]) > 1)
     {
-        gridLayer[startY][startX] = Normal_X_Corridor;
-        updateNeighbours(gridLayer, width, length, startX, startY, heap, distMap, &rngState);
+        if (gridLayer[startY][startX] & TALOS_SEED_TILE_MASK)
+            gridLayer[startY][startX] = TALOS_SEED_TILE_MASK;
+        else
+            collapseTile(&gridLayer[startY][startX], current_spawnrates, &rngState);
+
+        updateNeighbours(gridLayer, width, length, startX, startY, heap, &rngState);
         valid_collapsed_count++;
 
-        // Add neighbors to heap to kickstart
+        // add neighbors to heap to kickstart
         if (startY > 0)
-            heapInsertOrUpdate(heap, gridLayer, startX, startY - 1, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX, startY - 1, &rngState);
         if (startY < length - 1)
-            heapInsertOrUpdate(heap, gridLayer, startX, startY + 1, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX, startY + 1, &rngState);
         if (startX > 0)
-            heapInsertOrUpdate(heap, gridLayer, startX - 1, startY, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX - 1, startY, &rngState);
         if (startX < width - 1)
-            heapInsertOrUpdate(heap, gridLayer, startX + 1, startY, distMap, &rngState);
+            heapInsertOrUpdate(heap, gridLayer, startX + 1, startY, &rngState);
     }
 
-    // High safety limit for complex masks
+    // high safety limit for complex masks
     int max_iter = width * length * 50;
     int iter = 0;
 
-    // 4. MAIN LOOP
+    // MAIN LOOP
     while (valid_collapsed_count < target_collapsed_count && iter < max_iter)
     {
         iter++;
 
-        // Only use dynamic pacing if NOT in mask mode
-        if (fulness >= 100 && (iter % 10 == 0 || valid_collapsed_count < 50))
+        // only use dynamic pacing if NOT in mask mode (and only for open-port mazes)
+        if (fulness >= 100 && anyOpen != Empty_Tile && (iter % 64 == 0 || valid_collapsed_count < 50))
         {
             update_spawnrates(current_spawnrates, valid_collapsed_count, target_collapsed_count);
         }
@@ -304,277 +680,1369 @@ int generateLayerThread(void *args)
 
         if (!found)
         {
-            // HEAP EMPTY: Reseed using AGGRESSIVE finder
-            // This will pick any tile inside the mask that isn't solved yet
-            if (findBestSeedLocation(gridLayer, width, length, distMap, &cx, &cy, &rngState))
+            // HEAP EMPTY: reseed using AGGRESSIVE finder
+            // this will pick any tile inside the mask that isnt solved yet
+            if (findBestSeedLocation(gridLayer, width, length, &cx, &cy, &rngState))
             {
                 found = true;
 
-                // Force seed a tile type (Normal X is flexible)
-                if (__builtin_popcount(gridLayer[cy][cx]) > 1)
+                if (TALOS_POPCOUNT(gridLayer[cy][cx]) > 1)
                 {
-                    gridLayer[cy][cx] = Normal_X_Corridor;
-                    updateNeighbours(gridLayer, width, length, cx, cy, heap, distMap, &rngState);
+                    if (gridLayer[cy][cx] & TALOS_SEED_TILE_MASK)
+                        gridLayer[cy][cx] = TALOS_SEED_TILE_MASK;
+                    else
+                        collapseTile(&gridLayer[cy][cx], current_spawnrates, &rngState);
+
+                    updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
                     valid_collapsed_count++;
 
                     // Add neighbors
                     if (cy > 0)
-                        heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, &rngState);
                     if (cy < length - 1)
-                        heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, &rngState);
                     if (cx > 0)
-                        heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, &rngState);
                     if (cx < width - 1)
-                        heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, distMap, &rngState);
+                        heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, &rngState);
 
-                    continue; // Skip the collapse step for this iteration
+                    continue; // skip the collapse step for this iteration
+                }
+                else if (TALOS_POPCOUNT(gridLayer[cy][cx]) == 1)
+                {
+                    updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
+                    valid_collapsed_count++;
+                    continue;
                 }
             }
             else
             {
-                // Truly no more tiles left to fill
+                if (TALOS_NUM_SOCKETS > 2 && iter < max_iter)
+                {
+                    bool reopened = false;
+                    for (uint32_t ry = 0; ry < length && !reopened; ry++)
+                    {
+                        for (uint32_t rx = 0; rx < width; rx++)
+                        {
+                            talos_tile_t c = gridLayer[ry][rx];
+                            if (c == Empty_Tile)
+                                continue;
+                            if (TALOS_POPCOUNT(c) != 1 || (c & exactCellValidMask(gridLayer, width, length, rx, ry)) == Empty_Tile)
+                            {
+                                backtrackNeighborhood(gridLayer, width, length, rx, ry, heap, &rngState);
+                                reopened = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (reopened)
+                    {
+                        valid_collapsed_count = countCollapsedCells(gridLayer, width, length);
+                        if (valid_collapsed_count >= target_collapsed_count)
+                            valid_collapsed_count = target_collapsed_count - 1;
+                        continue;
+                    }
+                }
+                // no more tiles left to fill
                 break;
             }
         }
 
-        // Collapse
-        if (__builtin_popcount(gridLayer[cy][cx]) > 1)
+        // collapse
+        if (TALOS_POPCOUNT(gridLayer[cy][cx]) > 1)
         {
             collapseTile(&gridLayer[cy][cx], current_spawnrates, &rngState);
-            updateNeighbours(gridLayer, width, length, cx, cy, heap, distMap, &rngState);
+            updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
 
-            // Note: Because updateNeighbours now revives dead tiles, gridLayer will never be Empty_Tile
-            // unless it was Mask Void. It will be All_Possible if it failed.
-            if (gridLayer[cy][cx] != Empty_Tile && __builtin_popcount(gridLayer[cy][cx]) == 1)
+            // because updateNeighbours now revives dead tiles, gridLayer will never be Empty_Tile
+            // unless it was mask void. It will be All_Possible if it failed
+            if (gridLayer[cy][cx] != Empty_Tile && TALOS_POPCOUNT(gridLayer[cy][cx]) == 1)
                 valid_collapsed_count++;
         }
 
-        // Add neighbors to heap
-        // Only add if they are still uncollapsed candidates
-        if (cy > 0 && __builtin_popcount(gridLayer[cy - 1][cx]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, distMap, &rngState);
-        if (cy < length - 1 && __builtin_popcount(gridLayer[cy + 1][cx]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, distMap, &rngState);
-        if (cx > 0 && __builtin_popcount(gridLayer[cy][cx - 1]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, distMap, &rngState);
-        if (cx < width - 1 && __builtin_popcount(gridLayer[cy][cx + 1]) > 1)
-            heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, distMap, &rngState);
+        // add neighbors to heap
+        // only add if they are still uncollapsed candidates
+        if (cy > 0 && TALOS_POPCOUNT(gridLayer[cy - 1][cx]) > 1)
+            heapInsertOrUpdate(heap, gridLayer, cx, cy - 1, &rngState);
+        if (cy < length - 1 && TALOS_POPCOUNT(gridLayer[cy + 1][cx]) > 1)
+            heapInsertOrUpdate(heap, gridLayer, cx, cy + 1, &rngState);
+        if (cx > 0 && TALOS_POPCOUNT(gridLayer[cy][cx - 1]) > 1)
+            heapInsertOrUpdate(heap, gridLayer, cx - 1, cy, &rngState);
+        if (cx < width - 1 && TALOS_POPCOUNT(gridLayer[cy][cx + 1]) > 1)
+            heapInsertOrUpdate(heap, gridLayer, cx + 1, cy, &rngState);
 
-        // VOID LOGIC (Only for Ocean Mode)
-        // If we hit target count in non-masked mode, start deleting unnecessary tiles
-        if (fulness >= 100 && valid_collapsed_count >= target_collapsed_count)
+        // VOID LOGIC (only for ocean mode on rulesets without 0-port tiles)
+        // if hit target count in nonmasked mode start deleting unnecessary tiles
+        if (!hasZeroPortTiles && fulness >= 100 && valid_collapsed_count >= target_collapsed_count)
         {
             if (!isTileRequired(gridLayer, width, length, cx, cy))
             {
                 gridLayer[cy][cx] = Empty_Tile;
-                updateNeighbours(gridLayer, width, length, cx, cy, heap, distMap, &rngState);
-                valid_collapsed_count--; // Adjust count
+                updateNeighbours(gridLayer, width, length, cx, cy, heap, &rngState);
+                valid_collapsed_count--; // adjust count
+            }
+        }
+
+        if (TALOS_NUM_SOCKETS > 2 && valid_collapsed_count >= target_collapsed_count && iter < max_iter)
+        {
+            valid_collapsed_count = countCollapsedCells(gridLayer, width, length);
+            if (valid_collapsed_count >= target_collapsed_count)
+            {
+                for (uint32_t ry = 0; ry < length; ry++)
+                {
+                    for (uint32_t rx = 0; rx < width; rx++)
+                    {
+                        talos_tile_t c = gridLayer[ry][rx];
+                        if (c == Empty_Tile)
+                            continue;
+                        if (TALOS_POPCOUNT(c) != 1 || (c & exactCellValidMask(gridLayer, width, length, rx, ry)) == Empty_Tile)
+                        {
+                            backtrackNeighborhood(gridLayer, width, length, rx, ry, heap, &rngState);
+                            valid_collapsed_count = countCollapsedCells(gridLayer, width, length);
+                            if (valid_collapsed_count >= target_collapsed_count)
+                                valid_collapsed_count = target_collapsed_count - 1;
+                            ry = length;
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
 
-    // 5. CLEANUP & WELDING
+    // CLEANUP & WELDING
     for (uint32_t i = 0; i < length; i++)
     {
         for (uint32_t j = 0; j < width; j++)
         {
-            // If anything is still superposition (shouldn't be), kill it
-            if (__builtin_popcount(gridLayer[i][j]) > 1)
+            // if anything is still superposition (shouldn't be), kill it
+            if (TALOS_POPCOUNT(gridLayer[i][j]) > 1)
                 gridLayer[i][j] = Empty_Tile;
         }
     }
 
-    sealMazeEdges(gridLayer, width, length);
-    fixupEdges(gridLayer, width, length);
-    findConnectedRegionsInPlace(gridLayer, width, length);
-    germanWelderInPlace(gridLayer, width, length, &rngState);
-
-    // Free memory
-    freeHeap(heap);
-    for (uint32_t i = 0; i < length; i++)
-        free(distMap[i]);
-    free(distMap);
-
-    // Unpack Regions
-    for (uint32_t i = 0; i < length; i++)
+    if (anyOpen != Empty_Tile && TALOS_NUM_SOCKETS <= 2)
     {
-        for (uint32_t j = 0; j < width; j++)
+        fixupEdges(gridLayer, width, length);
+        sealMazeEdges(gridLayer, width, length);
+        repairMazePortsInPlace(gridLayer, width, length);
+
+        bool allConnected = true;
+        bool postWeldRepaired = false;
+        for (int weldPass = 0; weldPass < 3; weldPass++)
         {
-            if (gridLayer[i][j] == 0xFFFF)
-                gridLayer[i][j] = Empty_Tile;
+            bool usedSuperset = false;
+            findConnectedRegionsInPlace(gridLayer, width, length);
+            germanWelderExInPlace(gridLayer, width, length, &rngState, &allConnected, &usedSuperset);
+
+            for (uint32_t i = 0; i < length; i++)
+            {
+                for (uint32_t j = 0; j < width; j++)
+                {
+                    if (gridLayer[i][j] == TALOS_PACKED_VOID)
+                        gridLayer[i][j] = Empty_Tile;
+                    else
+                    {
+                        uint8_t index = (uint8_t)(gridLayer[i][j] & TALOS_TILE_INDEX_MASK);
+                        gridLayer[i][j] = indexToMask(index);
+                    }
+                }
+            }
+
+            if (!usedSuperset)
+            {
+                postWeldRepaired = false;
+                break;
+            }
+
+            postWeldRepaired = repairMazePortsInPlace(gridLayer, width, length);
+            if (!postWeldRepaired)
+                break;
+        }
+
+        if (!allConnected || postWeldRepaired)
+            pruneUnreachableComponentsInPlace(gridLayer, width, length);
+    }
+
+    // free memory
+    freeHeap(heap);
+
+    return 0;
+}
+
+typedef struct
+{
+    uint32_t cx, cy;
+    uint32_t x0, y0, x1, y1;
+    uint32_t chunkSeed;
+} CheckerChunkTask;
+
+
+static int countChunkCollapsed3D(
+    talos_tile_t ***grid, uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1, uint32_t height)
+{
+    int count = 0;
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = y0; y <= y1; y++)
+        {
+            for (uint32_t x = x0; x <= x1; x++)
+            {
+                if (grid[z][y][x] != Empty_Tile && TALOS_POPCOUNT(grid[z][y][x]) == 1)
+                    count++;
+            }
+        }
+    }
+    return count;
+}
+
+static void solveColumnChunk3D(
+    talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+    uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1,
+    uint32_t chunkSeed, uint32_t fulness, ChunkHeap3D *heap)
+{
+    uint32_t rngState = chunkSeed;
+    uint32_t cw = x1 - x0 + 1;
+    uint32_t cl = y1 - y0 + 1;
+
+    bindChunkHeap3D(heap, x0, y0, cw, cl, height);
+
+    talos_tile_t anyOpen = talosHasAnyOpenPort();
+    talos_tile_t allPortTiles = TALOS_HAS_PORT_MASK[0] | TALOS_HAS_PORT_MASK[1] |
+                                TALOS_HAS_PORT_MASK[2] | TALOS_HAS_PORT_MASK[3];
+    bool hasZeroPortTiles = ((All_Possible_State & ~allPortTiles) != Empty_Tile);
+    bool isMultiRule = (TALOS_NUM_SOCKETS > 2);
+    bool hasVertRules = (TALOS_VERT_PROP_MASK[0][0] != All_Possible_State &&
+                         TALOS_VERT_PROP_MASK[0][1] != All_Possible_State);
+
+    float current_spawnrates[TALOS_MAX_CATEGORIES];
+    if (fulness < 100 || anyOpen == Empty_Tile || isMultiRule || hasVertRules)
+    {
+        for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
+            current_spawnrates[i] = TALOS_CATEGORY_MASK_WEIGHT[i];
+    }
+    else
+    {
+        int naturalCount = 0;
+        for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
+            if (TALOS_CATEGORY_NATURAL[i])
+                naturalCount++;
+
+        for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
+            current_spawnrates[i] = (TALOS_CATEGORY_NATURAL[i] && naturalCount > 0) ? (1.0f / (float)naturalCount) : 0.0f;
+    }
+
+    int target_collapsed_count = 0;
+
+    // pull constraints from void and already collapsed neighbor chunks
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = y0; y <= y1; y++)
+        {
+            for (uint32_t x = x0; x <= x1; x++)
+            {
+                talos_tile_t cell = grid[z][y][x];
+                if (cell == Empty_Tile)
+                    continue;
+                target_collapsed_count++;
+
+                if (TALOS_POPCOUNT(cell) > 1)
+                {
+                    talos_tile_t valid = exactCellValidMask3D(grid, width, length, height, x, y, z);
+                    if ((cell & valid) != Empty_Tile)
+                        grid[z][y][x] = cell & valid;
+                    else if (valid != Empty_Tile)
+                        grid[z][y][x] = valid;
+                }
+            }
+        }
+    }
+
+    if (target_collapsed_count == 0)
+        return;
+
+    // propagate void, anchors and chunk border constraints
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = y0; y <= y1; y++)
+        {
+            for (uint32_t x = x0; x <= x1; x++)
+            {
+                talos_tile_t cell = grid[z][y][x];
+                if (cell == Empty_Tile || TALOS_POPCOUNT(cell) == 1)
+                {
+                    updateNeighboursChunk3D(grid, width, length, height, heap, x, y, z, &rngState);
+                }
+                else if (x == x0 || x == x1 || y == y0 || y == y1)
+                {
+                    if ((x == x0 && x0 > 0 && TALOS_POPCOUNT(grid[z][y][x0 - 1]) == 1) ||
+                        (x == x1 && x1 + 1 < width && TALOS_POPCOUNT(grid[z][y][x1 + 1]) == 1) ||
+                        (y == y0 && y0 > 0 && TALOS_POPCOUNT(grid[z][y0 - 1][x]) == 1) ||
+                        (y == y1 && y1 + 1 < length && TALOS_POPCOUNT(grid[z][y1 + 1][x]) == 1))
+                    {
+                        chunkHeapInsertOrUpdate3D(heap, grid, x, y, z, &rngState);
+                        if (TALOS_NUM_SOCKETS > 2)
+                            updateNeighboursChunk3D(grid, width, length, height, heap, x, y, z, &rngState);
+                    }
+                }
+            }
+        }
+    }
+
+    int valid_collapsed_count = countChunkCollapsed3D(grid, x0, y0, x1, y1, height);
+
+    // seed chunk center if nothing is in the heap yet (phase 0 chunks)
+    if (heap->count == 0)
+    {
+        uint32_t midX = x0 + cw / 2;
+        uint32_t midY = y0 + cl / 2;
+        for (uint32_t z = 0; z < height; z++)
+        {
+            if (grid[z][midY][midX] != Empty_Tile && TALOS_POPCOUNT(grid[z][midY][midX]) > 1)
+            {
+                if (grid[z][midY][midX] & TALOS_SEED_TILE_MASK)
+                    grid[z][midY][midX] = TALOS_SEED_TILE_MASK;
+                else
+                    collapseTile(&grid[z][midY][midX], current_spawnrates, &rngState);
+
+                updateNeighboursChunk3D(grid, width, length, height, heap, midX, midY, z, &rngState);
+                valid_collapsed_count++;
+
+                if (midY > y0)
+                    chunkHeapInsertOrUpdate3D(heap, grid, midX, midY - 1, z, &rngState);
+                if (midY < y1)
+                    chunkHeapInsertOrUpdate3D(heap, grid, midX, midY + 1, z, &rngState);
+                if (midX > x0)
+                    chunkHeapInsertOrUpdate3D(heap, grid, midX - 1, midY, z, &rngState);
+                if (midX < x1)
+                    chunkHeapInsertOrUpdate3D(heap, grid, midX + 1, midY, z, &rngState);
+                if (z > 0)
+                    chunkHeapInsertOrUpdate3D(heap, grid, midX, midY, z - 1, &rngState);
+                if (z + 1 < height)
+                    chunkHeapInsertOrUpdate3D(heap, grid, midX, midY, z + 1, &rngState);
+            }
+        }
+    }
+
+    int max_iter = (int)(cw * cl * height * 50u);
+    int iter = 0;
+
+    // main 3d wfc loop for this column chunk
+    while (valid_collapsed_count < target_collapsed_count && iter < max_iter)
+    {
+        iter++;
+
+        if (fulness >= 100 && anyOpen != Empty_Tile && !hasVertRules && (iter % 32 == 0 || valid_collapsed_count < 25))
+        {
+            update_spawnrates(current_spawnrates, valid_collapsed_count, target_collapsed_count);
+        }
+
+        uint32_t cx, cy, cz;
+        bool found = chunkHeapPop3D(heap, grid, &cx, &cy, &cz);
+
+        if (!found)
+        {
+            if (findBestSeedLocationChunk3D(grid, width, length, height, heap, &cx, &cy, &cz, &rngState))
+            {
+                if (TALOS_POPCOUNT(grid[cz][cy][cx]) > 1)
+                {
+                    if (grid[cz][cy][cx] & TALOS_SEED_TILE_MASK)
+                        grid[cz][cy][cx] = TALOS_SEED_TILE_MASK;
+                    else
+                        collapseTile(&grid[cz][cy][cx], current_spawnrates, &rngState);
+
+                    updateNeighboursChunk3D(grid, width, length, height, heap, cx, cy, cz, &rngState);
+                    valid_collapsed_count++;
+
+                    if (cy > y0)
+                        chunkHeapInsertOrUpdate3D(heap, grid, cx, cy - 1, cz, &rngState);
+                    if (cy < y1)
+                        chunkHeapInsertOrUpdate3D(heap, grid, cx, cy + 1, cz, &rngState);
+                    if (cx > x0)
+                        chunkHeapInsertOrUpdate3D(heap, grid, cx - 1, cy, cz, &rngState);
+                    if (cx < x1)
+                        chunkHeapInsertOrUpdate3D(heap, grid, cx + 1, cy, cz, &rngState);
+                    if (cz > 0)
+                        chunkHeapInsertOrUpdate3D(heap, grid, cx, cy, cz - 1, &rngState);
+                    if (cz + 1 < height)
+                        chunkHeapInsertOrUpdate3D(heap, grid, cx, cy, cz + 1, &rngState);
+                    continue;
+                }
+                else if (TALOS_POPCOUNT(grid[cz][cy][cx]) == 1)
+                {
+                    updateNeighboursChunk3D(grid, width, length, height, heap, cx, cy, cz, &rngState);
+                    valid_collapsed_count++;
+                    continue;
+                }
+            }
             else
             {
-                uint8_t index = gridLayer[i][j] & 0xF;
-                gridLayer[i][j] = indexToMask(index);
+                if (isMultiRule && iter < max_iter)
+                {
+                    bool reopened = false;
+                    for (uint32_t rz = 0; rz < height && !reopened; rz++)
+                    {
+                        for (uint32_t ry = y0; ry <= y1 && !reopened; ry++)
+                        {
+                            for (uint32_t rx = x0; rx <= x1; rx++)
+                            {
+                                talos_tile_t c = grid[rz][ry][rx];
+                                if (c == Empty_Tile)
+                                    continue;
+                                if (TALOS_POPCOUNT(c) != 1 || (c & exactCellValidMask3D(grid, width, length, height, rx, ry, rz)) == Empty_Tile)
+                                {
+                                    backtrackChunkNeighborhood3D(grid, width, length, height, heap, rx, ry, rz, &rngState);
+                                    reopened = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (reopened)
+                    {
+                        valid_collapsed_count = countChunkCollapsed3D(grid, x0, y0, x1, y1, height);
+                        if (valid_collapsed_count >= target_collapsed_count)
+                            valid_collapsed_count = target_collapsed_count - 1;
+                        continue;
+                    }
+                }
+                break;
             }
+        }
+
+        if (TALOS_POPCOUNT(grid[cz][cy][cx]) > 1)
+        {
+            collapseTile(&grid[cz][cy][cx], current_spawnrates, &rngState);
+            updateNeighboursChunk3D(grid, width, length, height, heap, cx, cy, cz, &rngState);
+            if (grid[cz][cy][cx] != Empty_Tile && TALOS_POPCOUNT(grid[cz][cy][cx]) == 1)
+                valid_collapsed_count++;
+        }
+
+        if (cy > y0 && TALOS_POPCOUNT(grid[cz][cy - 1][cx]) > 1)
+            chunkHeapInsertOrUpdate3D(heap, grid, cx, cy - 1, cz, &rngState);
+        if (cy < y1 && TALOS_POPCOUNT(grid[cz][cy + 1][cx]) > 1)
+            chunkHeapInsertOrUpdate3D(heap, grid, cx, cy + 1, cz, &rngState);
+        if (cx > x0 && TALOS_POPCOUNT(grid[cz][cy][cx - 1]) > 1)
+            chunkHeapInsertOrUpdate3D(heap, grid, cx - 1, cy, cz, &rngState);
+        if (cx < x1 && TALOS_POPCOUNT(grid[cz][cy][cx + 1]) > 1)
+            chunkHeapInsertOrUpdate3D(heap, grid, cx + 1, cy, cz, &rngState);
+        if (cz > 0 && TALOS_POPCOUNT(grid[cz - 1][cy][cx]) > 1)
+            chunkHeapInsertOrUpdate3D(heap, grid, cx, cy, cz - 1, &rngState);
+        if (cz + 1 < height && TALOS_POPCOUNT(grid[cz + 1][cy][cx]) > 1)
+            chunkHeapInsertOrUpdate3D(heap, grid, cx, cy, cz + 1, &rngState);
+
+        if (!hasZeroPortTiles && fulness >= 100 && valid_collapsed_count >= target_collapsed_count)
+        {
+            if (!isTileRequired(grid[cz], width, length, cx, cy))
+            {
+                grid[cz][cy][cx] = Empty_Tile;
+                updateNeighboursChunk3D(grid, width, length, height, heap, cx, cy, cz, &rngState);
+                valid_collapsed_count--;
+            }
+        }
+
+        if (isMultiRule && valid_collapsed_count >= target_collapsed_count && iter < max_iter)
+        {
+            valid_collapsed_count = countChunkCollapsed3D(grid, x0, y0, x1, y1, height);
+            if (valid_collapsed_count >= target_collapsed_count)
+            {
+                bool reopened = false;
+                for (uint32_t rz = 0; rz < height && !reopened; rz++)
+                {
+                    for (uint32_t ry = y0; ry <= y1 && !reopened; ry++)
+                    {
+                        for (uint32_t rx = x0; rx <= x1; rx++)
+                        {
+                            talos_tile_t c = grid[rz][ry][rx];
+                            if (c == Empty_Tile)
+                                continue;
+                            if (TALOS_POPCOUNT(c) != 1 || (c & exactCellValidMask3D(grid, width, length, height, rx, ry, rz)) == Empty_Tile)
+                            {
+                                backtrackChunkNeighborhood3D(grid, width, length, height, heap, rx, ry, rz, &rngState);
+                                valid_collapsed_count = countChunkCollapsed3D(grid, x0, y0, x1, y1, height);
+                                if (valid_collapsed_count >= target_collapsed_count)
+                                    valid_collapsed_count = target_collapsed_count - 1;
+                                reopened = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void finalizeLayerSeamsAndWeld(
+    talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+    uint32_t z, uint32_t layerSeed, uint32_t fulness)
+{
+    talos_tile_t **gridLayer = grid[z];
+    uint32_t rngState = layerSeed;
+    talos_tile_t anyOpen = talosHasAnyOpenPort();
+
+    if (TALOS_NUM_SOCKETS > 2)
+    {
+        float current_spawnrates[TALOS_MAX_CATEGORIES];
+        for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
+            current_spawnrates[i] = TALOS_CATEGORY_MASK_WEIGHT[i];
+
+        MinHeap *seamHeap = NULL;
+        int maxSeamIter = (int)(width * length * 20u);
+        int seamIter = 0;
+
+        while (seamIter < maxSeamIter)
+        {
+            bool foundMismatch = false;
+            for (uint32_t y = 0; y < length && !foundMismatch; y++)
+            {
+                for (uint32_t x = 0; x < width; x++)
+                {
+                    talos_tile_t c = gridLayer[y][x];
+                    if (c == Empty_Tile)
+                        continue;
+                    if (TALOS_POPCOUNT(c) != 1 || (c & exactCellValidMask3D(grid, width, length, height, x, y, z)) == Empty_Tile)
+                    {
+                        if (!seamHeap)
+                            seamHeap = initHeap(width, length);
+                        backtrackNeighborhood(gridLayer, width, length, x, y, seamHeap, &rngState);
+                        foundMismatch = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!foundMismatch)
+                break;
+
+            uint32_t cx, cy;
+            while (seamIter < maxSeamIter && heapPop(seamHeap, gridLayer, &cx, &cy))
+            {
+                seamIter++;
+                if (TALOS_POPCOUNT(gridLayer[cy][cx]) > 1)
+                {
+                    collapseTile(&gridLayer[cy][cx], current_spawnrates, &rngState);
+                    updateNeighbours(gridLayer, width, length, cx, cy, seamHeap, &rngState);
+                }
+                if (cy > 0 && TALOS_POPCOUNT(gridLayer[cy - 1][cx]) > 1)
+                    heapInsertOrUpdate(seamHeap, gridLayer, cx, cy - 1, &rngState);
+                if (cy + 1 < length && TALOS_POPCOUNT(gridLayer[cy + 1][cx]) > 1)
+                    heapInsertOrUpdate(seamHeap, gridLayer, cx, cy + 1, &rngState);
+                if (cx > 0 && TALOS_POPCOUNT(gridLayer[cy][cx - 1]) > 1)
+                    heapInsertOrUpdate(seamHeap, gridLayer, cx - 1, cy, &rngState);
+                if (cx + 1 < width && TALOS_POPCOUNT(gridLayer[cy][cx + 1]) > 1)
+                    heapInsertOrUpdate(seamHeap, gridLayer, cx + 1, cy, &rngState);
+            }
+            seamIter++;
+        }
+
+        if (seamHeap)
+            freeHeap(seamHeap);
+    }
+
+    for (uint32_t i = 0; i < length; i++)
+    {
+        for (uint32_t j = 0; j < width; j++)
+        {
+            if (TALOS_POPCOUNT(gridLayer[i][j]) > 1)
+            {
+                if (fulness < 100 && TALOS_NUM_SOCKETS <= 2)
+                    gridLayer[i][j] = Empty_Tile;
+                else
+                    gridLayer[i][j] = TALOS_BIT(TALOS_CTZ(gridLayer[i][j]));
+            }
+        }
+    }
+
+    if (anyOpen != Empty_Tile && TALOS_NUM_SOCKETS <= 2)
+    {
+        fixupEdges(gridLayer, width, length);
+        sealMazeEdges(gridLayer, width, length);
+        repairMazePortsInPlace(gridLayer, width, length);
+
+        bool allConnected = true;
+        bool postWeldRepaired = false;
+        for (int weldPass = 0; weldPass < 3; weldPass++)
+        {
+            bool usedSuperset = false;
+            findConnectedRegionsInPlace(gridLayer, width, length);
+            germanWelderExInPlace(gridLayer, width, length, &rngState, &allConnected, &usedSuperset);
+
+            for (uint32_t i = 0; i < length; i++)
+            {
+                for (uint32_t j = 0; j < width; j++)
+                {
+                    if (gridLayer[i][j] == TALOS_PACKED_VOID)
+                        gridLayer[i][j] = Empty_Tile;
+                    else
+                    {
+                        uint8_t index = (uint8_t)(gridLayer[i][j] & TALOS_TILE_INDEX_MASK);
+                        gridLayer[i][j] = indexToMask(index);
+                    }
+                }
+            }
+
+            if (!usedSuperset)
+            {
+                postWeldRepaired = false;
+                break;
+            }
+
+            postWeldRepaired = repairMazePortsInPlace(gridLayer, width, length);
+            if (!postWeldRepaired)
+                break;
+        }
+
+        if (!allConnected || postWeldRepaired)
+            pruneUnreachableComponentsInPlace(gridLayer, width, length);
+    }
+}
+
+typedef struct
+{
+    uint32_t flatA;
+    uint8_t dir;
+} AriadneEdge3D;
+
+static inline uint8_t portBits6OfTile(uint8_t idx)
+{
+    talos_tile_t bit = TALOS_BIT(idx);
+    uint8_t m = 0;
+    for (int d = 0; d < 4; d++)
+    {
+        if (bit & TALOS_HAS_PORT_MASK[d])
+            m |= (uint8_t)(1u << d);
+    }
+    if ((bit & TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_DOWN]) == Empty_Tile)
+        m |= (uint8_t)(1u << 4); // U (z + 1)
+    if ((bit & TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_UP]) == Empty_Tile)
+        m |= (uint8_t)(1u << 5); // D (z - 1)
+    return m;
+}
+
+static void expandAriadne3D(
+    const uint8_t *p6, uint8_t *vis,
+    uint32_t width, uint32_t length, uint32_t height,
+    uint32_t startFlat, uint32_t *bfsQ,
+    AriadneEdge3D *frontier, uint32_t *frontierCount, uint32_t maxFrontier)
+{
+    static const int32_t dx6[6]  = {  0,  1,  0, -1,  0,  0 };
+    static const int32_t dy6[6]  = { -1,  0,  1,  0,  0,  0 };
+    static const int32_t dz6[6]  = {  0,  0,  0,  0,  1, -1 };
+    static const uint8_t opp6[6] = {  2,  3,  0,  1,  5,  4 };
+
+    uint32_t head = 0, tail = 0;
+    vis[startFlat] = 1;
+    bfsQ[tail++] = startFlat;
+    uint32_t layerArea = width * length;
+
+    while (head < tail)
+    {
+        uint32_t a = bfsQ[head++];
+        uint32_t z = a / layerArea;
+        uint32_t rem = a % layerArea;
+        uint32_t y = rem / width;
+        uint32_t x = rem % width;
+        uint8_t pa = p6[a];
+
+        for (uint8_t d = 0; d < 6; d++)
+        {
+            int32_t nx = (int32_t)x + dx6[d];
+            int32_t ny = (int32_t)y + dy6[d];
+            int32_t nz = (int32_t)z + dz6[d];
+            if (nx < 0 || ny < 0 || nz < 0 ||
+                (uint32_t)nx >= width || (uint32_t)ny >= length || (uint32_t)nz >= height)
+                continue;
+
+            uint32_t b = ((uint32_t)nz * length + (uint32_t)ny) * width + (uint32_t)nx;
+            uint8_t pb = p6[b];
+            if (pb == 0 || vis[b])
+                continue;
+
+            if ((pa & (1u << d)) && (pb & (1u << opp6[d])))
+            {
+                vis[b] = 1;
+                bfsQ[tail++] = b;
+            }
+            else if (*frontierCount < maxFrontier)
+            {
+                frontier[(*frontierCount)++] = (AriadneEdge3D){ a, d };
+            }
+        }
+    }
+}
+
+static void finalize3DPipeTopology(
+    talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t *rng)
+{
+    static const int32_t dx6[6]  = {  0,  1,  0, -1,  0,  0 };
+    static const int32_t dy6[6]  = { -1,  0,  1,  0,  0,  0 };
+    static const int32_t dz6[6]  = {  0,  0,  0,  0,  1, -1 };
+    static const uint8_t opp6[6] = {  2,  3,  0,  1,  5,  4 };
+
+    uint8_t mask6ToTile[64];
+    uint8_t tileToMask6[64];
+    for (int m = 0; m < 64; m++)
+    {
+        mask6ToTile[m] = 0xFF;
+        tileToMask6[m] = 0;
+    }
+    for (int t = 0; t < TALOS_NUM_TILES; t++)
+    {
+        uint8_t m = portBits6OfTile((uint8_t)t);
+        tileToMask6[t] = m;
+        if (TALOS_CATEGORY_NATURAL[TALOS_BIT_TO_CATEGORY[t]] && mask6ToTile[m] == 0xFF)
+            mask6ToTile[m] = (uint8_t)t;
+    }
+
+    uint32_t layerArea = width * length;
+    uint32_t total3D = layerArea * height;
+    uint8_t *p6 = calloc(total3D, sizeof(uint8_t));
+    if (!p6)
+        return;
+
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = 0; y < length; y++)
+        {
+            for (uint32_t x = 0; x < width; x++)
+            {
+                talos_tile_t cell = grid[z][y][x];
+                if (cell != Empty_Tile)
+                    p6[(z * length + y) * width + x] = tileToMask6[TALOS_CTZ(cell)];
+            }
+        }
+    }
+
+    // strip ports opening into void or out of bounds
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = 0; y < length; y++)
+        {
+            for (uint32_t x = 0; x < width; x++)
+            {
+                uint32_t a = (z * length + y) * width + x;
+                if (p6[a] == 0)
+                    continue;
+                for (uint8_t d = 0; d < 6; d++)
+                {
+                    if (!(p6[a] & (1u << d)))
+                        continue;
+                    int32_t nx = (int32_t)x + dx6[d];
+                    int32_t ny = (int32_t)y + dy6[d];
+                    int32_t nz = (int32_t)z + dz6[d];
+                    if (nx < 0 || ny < 0 || nz < 0 ||
+                        (uint32_t)nx >= width || (uint32_t)ny >= length || (uint32_t)nz >= height ||
+                        grid[nz][ny][nx] == Empty_Tile)
+                    {
+                        p6[a] &= (uint8_t)~(1u << d);
+                    }
+                }
+            }
+        }
+    }
+
+    // make interior 3d edges symmetric
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = 0; y < length; y++)
+        {
+            for (uint32_t x = 0; x < width; x++)
+            {
+                uint32_t a = (z * length + y) * width + x;
+                if (grid[z][y][x] == Empty_Tile)
+                    continue;
+
+                static const uint8_t posDirs[3] = { 1, 2, 4 }; // E(+X), S(+Y), U(+Z)
+                for (int k = 0; k < 3; k++)
+                {
+                    uint8_t d = posDirs[k];
+                    uint8_t opp = opp6[d];
+                    int32_t nx = (int32_t)x + dx6[d];
+                    int32_t ny = (int32_t)y + dy6[d];
+                    int32_t nz = (int32_t)z + dz6[d];
+                    if (nx >= (int32_t)width || ny >= (int32_t)length || nz >= (int32_t)height)
+                        continue;
+                    if (grid[nz][ny][nx] == Empty_Tile)
+                        continue;
+
+                    uint32_t b = ((uint32_t)nz * length + (uint32_t)ny) * width + (uint32_t)nx;
+                    uint8_t bitA = (uint8_t)((p6[a] >> d) & 1u);
+                    uint8_t bitB = (uint8_t)((p6[b] >> opp) & 1u);
+                    if (bitA == bitB)
+                        continue;
+
+                    uint8_t openA  = (uint8_t)(p6[a] | (1u << d));
+                    uint8_t openB  = (uint8_t)(p6[b] | (1u << opp));
+                    uint8_t closeA = (uint8_t)(p6[a] & ~(1u << d));
+                    uint8_t closeB = (uint8_t)(p6[b] & ~(1u << opp));
+
+                    if (mask6ToTile[openA] != 0xFF && mask6ToTile[openB] != 0xFF)
+                    {
+                        p6[a] = openA;
+                        p6[b] = openB;
+                    }
+                    else
+                    {
+                        p6[a] = closeA;
+                        p6[b] = closeB;
+                    }
+                }
+            }
+        }
+    }
+
+    // if a non-void cell ended up with all 6 ports closed, open 1 valid edge to a neighbor
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = 0; y < length; y++)
+        {
+            for (uint32_t x = 0; x < width; x++)
+            {
+                uint32_t a = (z * length + y) * width + x;
+                if (grid[z][y][x] == Empty_Tile || (p6[a] != 0 && mask6ToTile[p6[a]] != 0xFF))
+                    continue;
+
+                for (uint8_t d = 0; d < 6; d++)
+                {
+                    int32_t nx = (int32_t)x + dx6[d];
+                    int32_t ny = (int32_t)y + dy6[d];
+                    int32_t nz = (int32_t)z + dz6[d];
+                    if (nx < 0 || ny < 0 || nz < 0 ||
+                        (uint32_t)nx >= width || (uint32_t)ny >= length || (uint32_t)nz >= height)
+                        continue;
+                    if (grid[nz][ny][nx] == Empty_Tile)
+                        continue;
+
+                    uint32_t b = ((uint32_t)nz * length + (uint32_t)ny) * width + (uint32_t)nx;
+                    uint8_t openA = (uint8_t)(1u << d);
+                    uint8_t openB = (uint8_t)(p6[b] | (1u << opp6[d]));
+                    if (mask6ToTile[openA] != 0xFF && mask6ToTile[openB] != 0xFF)
+                    {
+                        p6[a] = openA;
+                        p6[b] = openB;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3d 6-way ariadne welder
+    uint8_t *vis = calloc(total3D, sizeof(uint8_t));
+    uint32_t *bfsQ = malloc(total3D * sizeof(uint32_t));
+    uint32_t maxFrontier = total3D * 6u;
+    AriadneEdge3D *frontier = malloc(maxFrontier * sizeof(AriadneEdge3D));
+
+    if (vis && bfsQ && frontier)
+    {
+        uint32_t frontierCount = 0;
+        for (uint32_t start = 0; start < total3D; start++)
+        {
+            if (p6[start] == 0 || vis[start])
+                continue;
+
+            expandAriadne3D(p6, vis, width, length, height, start, bfsQ, frontier, &frontierCount, maxFrontier);
+
+            while (frontierCount > 0)
+            {
+                uint32_t pick = nextRandom(rng) % frontierCount;
+                AriadneEdge3D e = frontier[pick];
+                frontier[pick] = frontier[--frontierCount];
+
+                uint32_t z = e.flatA / layerArea;
+                uint32_t rem = e.flatA % layerArea;
+                uint32_t y = rem / width;
+                uint32_t x = rem % width;
+
+                int32_t nx = (int32_t)x + dx6[e.dir];
+                int32_t ny = (int32_t)y + dy6[e.dir];
+                int32_t nz = (int32_t)z + dz6[e.dir];
+                if (nx < 0 || ny < 0 || nz < 0 ||
+                    (uint32_t)nx >= width || (uint32_t)ny >= length || (uint32_t)nz >= height)
+                    continue;
+
+                uint32_t b = ((uint32_t)nz * length + (uint32_t)ny) * width + (uint32_t)nx;
+                if (p6[b] == 0 || vis[b])
+                    continue;
+
+                uint8_t opp = opp6[e.dir];
+                uint8_t openA = (uint8_t)(p6[e.flatA] | (1u << e.dir));
+                uint8_t openB = (uint8_t)(p6[b] | (1u << opp));
+                if (mask6ToTile[openA] == 0xFF || mask6ToTile[openB] == 0xFF)
+                    continue;
+
+                p6[e.flatA] = openA;
+                p6[b]       = openB;
+                expandAriadne3D(p6, vis, width, length, height, b, bfsQ, frontier, &frontierCount, maxFrontier);
+            }
+        }
+
+        // keep only largest 3d connected component
+        int32_t *compId = malloc(total3D * sizeof(int32_t));
+        if (compId)
+        {
+            for (uint32_t i = 0; i < total3D; i++)
+                compId[i] = -1;
+
+            int32_t numComps = 0, bestComp = -1;
+            uint32_t bestSize = 0;
+
+            for (uint32_t s = 0; s < total3D; s++)
+            {
+                if (p6[s] == 0 || mask6ToTile[p6[s]] == 0xFF || compId[s] != -1)
+                    continue;
+                int32_t cid = numComps++;
+                uint32_t head = 0, tail = 0, sz = 0;
+                compId[s] = cid;
+                bfsQ[tail++] = s;
+
+                while (head < tail)
+                {
+                    uint32_t a = bfsQ[head++];
+                    sz++;
+                    uint32_t z = a / layerArea;
+                    uint32_t rem = a % layerArea;
+                    uint32_t y = rem / width;
+                    uint32_t x = rem % width;
+                    uint8_t pa = p6[a];
+
+                    for (uint8_t d = 0; d < 6; d++)
+                    {
+                        if (!(pa & (1u << d)))
+                            continue;
+                        int32_t nx = (int32_t)x + dx6[d];
+                        int32_t ny = (int32_t)y + dy6[d];
+                        int32_t nz = (int32_t)z + dz6[d];
+                        if (nx < 0 || ny < 0 || nz < 0 ||
+                            (uint32_t)nx >= width || (uint32_t)ny >= length || (uint32_t)nz >= height)
+                            continue;
+                        uint32_t b = ((uint32_t)nz * length + (uint32_t)ny) * width + (uint32_t)nx;
+                        if (compId[b] != -1)
+                            continue;
+                        if (p6[b] != 0 && (p6[b] & (1u << opp6[d])))
+                        {
+                            compId[b] = cid;
+                            bfsQ[tail++] = b;
+                        }
+                    }
+                }
+                if (sz > bestSize)
+                {
+                    bestSize = sz;
+                    bestComp = cid;
+                }
+            }
+
+            if (numComps > 1 && bestComp != -1)
+            {
+                for (uint32_t i = 0; i < total3D; i++)
+                    if (compId[i] != bestComp)
+                        p6[i] = 0;
+            }
+            free(compId);
+        }
+    }
+
+    free(vis);
+    free(bfsQ);
+    free(frontier);
+
+    for (uint32_t z = 0; z < height; z++)
+    {
+        for (uint32_t y = 0; y < length; y++)
+        {
+            for (uint32_t x = 0; x < width; x++)
+            {
+                uint8_t m = p6[(z * length + y) * width + x];
+                grid[z][y][x] = (m != 0 && mask6ToTile[m] != 0xFF) ? TALOS_BIT(mask6ToTile[m]) : Empty_Tile;
+            }
+        }
+    }
+
+    free(p6);
+}
+
+#ifdef TALOS_HAS_C11_ATOMICS
+typedef struct
+{
+    atomic_uint arrived;
+    atomic_uint sense;
+    uint32_t totalWorkers;
+} CheckerBarrier;
+
+static inline void checkerBarrierInit(CheckerBarrier *b, uint32_t totalWorkers)
+{
+    atomic_init(&b->arrived, 0u);
+    atomic_init(&b->sense, 0u);
+    b->totalWorkers = totalWorkers;
+}
+
+static inline void checkerBarrierWait(CheckerBarrier *b, uint32_t *localSense)
+{
+    if (b->totalWorkers <= 1u)
+        return;
+    *localSense ^= 1u;
+    if (atomic_fetch_add_explicit(&b->arrived, 1u, memory_order_acq_rel) + 1u == b->totalWorkers)
+    {
+        atomic_store_explicit(&b->arrived, 0u, memory_order_relaxed);
+        atomic_store_explicit(&b->sense, *localSense, memory_order_release);
+    }
+    else
+    {
+        while (atomic_load_explicit(&b->sense, memory_order_acquire) != *localSense)
+            thrd_yield();
+    }
+}
+#endif
+
+typedef struct
+{
+    talos_tile_t ***grid;
+    uint32_t width, length, height;
+    uint32_t seed, fulness;
+    uint32_t workerId;
+    uint32_t numWorkers;
+    uint32_t maxChunkW, maxChunkL;
+    bool hasNatVert;
+    CheckerChunkTask *phaseTasks[4];
+    uint32_t phaseCounts[4];
+#ifdef TALOS_HAS_C11_ATOMICS
+    CheckerBarrier *barrier;
+#endif
+} CheckerPoolWorkerArgs;
+
+static int runCheckerPoolWorker(void *argPtr)
+{
+    CheckerPoolWorkerArgs *w = (CheckerPoolWorkerArgs *)argPtr;
+    ChunkHeap3D *heap = initChunkHeap3D(w->maxChunkW, w->maxChunkL, w->height);
+    if (!heap)
+        return 1;
+
+#ifdef TALOS_HAS_C11_ATOMICS
+    uint32_t localSense = 0u;
+#endif
+
+    // 4-color checkerboard passes (0=red, 1=blue, 2=green, 3=yellow)
+    for (int phase = 0; phase < 4; phase++)
+    {
+        uint32_t count = w->phaseCounts[phase];
+        const CheckerChunkTask *tasks = w->phaseTasks[phase];
+        for (uint32_t idx = w->workerId; idx < count; idx += w->numWorkers)
+        {
+            const CheckerChunkTask *t = &tasks[idx];
+            solveColumnChunk3D(
+                w->grid, w->width, w->length, w->height,
+                t->x0, t->y0, t->x1, t->y1,
+                t->chunkSeed, w->fulness, heap);
+        }
+#ifdef TALOS_HAS_C11_ATOMICS
+        if (w->barrier)
+            checkerBarrierWait(w->barrier, &localSense);
+#endif
+    }
+
+    freeChunkHeap3D(heap);
+
+    // layer seam cleanup + welding for 2.5d layers
+    if (!w->hasNatVert)
+    {
+        for (uint32_t z = w->workerId; z < w->height; z += w->numWorkers)
+        {
+            uint32_t layerSeed = w->seed ^ ((z + 1u) * 0xC2B2AE35u);
+            nextRandom(&layerSeed);
+            finalizeLayerSeamsAndWeld(w->grid, w->width, w->length, w->height, z, layerSeed, w->fulness);
         }
     }
 
     return 0;
 }
 
-uint16_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness)
+talos_tile_t ***generateGrid(uint32_t width, uint32_t length, uint32_t height, uint32_t seed, uint32_t fulness)
 {
-    CGSME_PROFILE_FUNC();
+    TALOS_PROFILE_FUNC();
 
-    // SAFETY CHECK
-    // WFC cannot mathematically operate on maps smaller than 3x3 (needs center + neighbors).
-    // German Welder needs space to exist.
     if (width < 4 || length < 4 || height < 1)
     {
-        return NULL; // fail instead of crashing
+        return NULL;
     }
 
-    /* overall generator instrumentation */
-#ifdef cgsme_DEBUG
-    uint64_t __cgsme_grid_start = cgsme_now_us();
-    uint64_t __cgsme_grid_start_cycles = cgsme_now_cycles();
+#ifdef TALOS_DEBUG
+    uint64_t __talos_grid_start = talos_now_us();
+    uint64_t __talos_grid_start_cycles = talos_now_cycles();
 #endif
 
-    // uint16_t ***grid = malloc(sizeof(uint16_t **) * height);
+    talos_tile_t ***grid = malloc(sizeof(talos_tile_t **) * height);
+    talos_tile_t **all_rows = malloc(height * length * sizeof(talos_tile_t *));
+    talos_tile_t *all_data = calloc(height * length * width, sizeof(talos_tile_t));
 
-    // for (int32_t i = 0; i < height; i++)
-    // {
-    //     // USE CALLOC
-    //     // ensures the grid is 00000000.
-    //     // can check "if grid[i][j] == 0" later
-    //     grid[i] = calloc(length, sizeof(uint16_t *));
-    //     for (int j = 0; j < length; j++)
-    //         grid[i][j] = calloc(width, sizeof(uint16_t));
-    // }
-
-    // top level pointer
-    uint16_t ***grid = malloc(sizeof(uint16_t **) * height);
-
-    // mid level pointer
-    uint16_t **all_rows = malloc(height * length * sizeof(uint16_t *));
-
-    // actual data all at once (all 0s)
-    uint16_t *all_data = calloc(height * length * width, sizeof(uint16_t));
-
-    // stich so it can be indexed as grid[layer][row][col]
     for (uint32_t i = 0; i < height; i++)
     {
-        grid[i] = &all_rows[i*length]; // point to the start of this layer
+        grid[i] = &all_rows[i * length];
         for (uint32_t j = 0; j < length; j++)
         {
-            // point to the start of this row
-            grid[i][j] = &all_data[(i*length + j)*width];
+            grid[i][j] = &all_data[(i * length + j) * width];
         }
     }
 
-    srand(seed);
-
-    // ARCHITECT PHASE
+    // mask + void clamping + area quotas
     runArchitect(grid, width, length, height, fulness, seed);
 
-    // LAYER GENERATION PHASE (MULTI-THREADING)
-    thrd_t *threads = malloc(sizeof(thrd_t) * height);
-    layerGenerationArgs *args = malloc(sizeof(layerGenerationArgs) * height);
-
-    // standard start point is center
-    int32_t centerX = width / 2;
-    int32_t centerY = length / 2;
-
-    for (uint32_t i = 0; i < height; i++)
+    // split into 4-color checkerboard column chunks for 2-socket mazes/pipes
+    // multi-socket rulesets (>2 sockets) run per-layer or full-volume so gradients dont break on chunk seams
+    talos_tile_t natMask = Empty_Tile;
+    bool hasNatVert = false;
+    for (int t = 0; t < TALOS_NUM_TILES; t++)
     {
-        // esvery layer attempts to start seeding from the center (and the Architect seeds)
-
-        args[i].gridLayer = grid[i];
-        args[i].width = width;
-        args[i].length = length;
-
-        args[i].startX = centerX;
-        args[i].startY = centerY;
-
-        args[i].endX = centerX;
-        args[i].endY = centerY;
-
-        args[i].seed = nextRandom(&seed); // Use deterministic derivative seeds
-        args[i].fulness = fulness;
-        args[i].layerIndex = i;
-
-        thrd_create(&threads[i], generateLayerThread, (void *)&args[i]);
+        if (TALOS_CATEGORY_NATURAL[TALOS_BIT_TO_CATEGORY[t]])
+            natMask |= TALOS_BIT(t);
+    }
+    for (int t = 0; t < TALOS_NUM_TILES && !hasNatVert; t++)
+    {
+        if (TALOS_CATEGORY_NATURAL[TALOS_BIT_TO_CATEGORY[t]])
+        {
+            if ((TALOS_VERT_PROP_MASK[t][0] & natMask) != natMask ||
+                (TALOS_VERT_PROP_MASK[t][1] & natMask) != natMask)
+                hasNatVert = true;
+        }
     }
 
-    // wait for threads
-    for (uint32_t i = 0; i < height; i++)
-        thrd_join(threads[i], NULL);
+    if (TALOS_NUM_SOCKETS > 2)
+    {
+        if (hasNatVert && height > 1)
+        {
+            ChunkHeap3D *heap3D = initChunkHeap3D(width, length, height);
+            if (heap3D)
+            {
+                solveColumnChunk3D(grid, width, length, height, 0, 0, width - 1, length - 1, seed, fulness, heap3D);
+                freeChunkHeap3D(heap3D);
+            }
+            for (uint32_t z = 0; z < height; z++)
+                for (uint32_t y = 0; y < length; y++)
+                    for (uint32_t x = 0; x < width; x++)
+                        if (TALOS_POPCOUNT(grid[z][y][x]) > 1)
+                            grid[z][y][x] = TALOS_BIT(TALOS_CTZ(grid[z][y][x]));
+        }
+        else
+        {
+            thrd_t *threads = malloc(sizeof(thrd_t) * height);
+            layerGenerationArgs *args = malloc(sizeof(layerGenerationArgs) * height);
+            int32_t centerX = (int32_t)(width / 2);
+            int32_t centerY = (int32_t)(length / 2);
+            uint32_t s = seed;
+            for (uint32_t i = 0; i < height; i++)
+            {
+                args[i].gridLayer = grid[i];
+                args[i].width = width;
+                args[i].length = length;
+                args[i].startX = centerX;
+                args[i].startY = centerY;
+                args[i].endX = centerX;
+                args[i].endY = centerY;
+                args[i].seed = nextRandom(&s);
+                args[i].fulness = (uint8_t)fulness;
+                args[i].layerIndex = (uint8_t)i;
+                thrd_create(&threads[i], generateLayerThread, (void *)&args[i]);
+            }
+            for (uint32_t i = 0; i < height; i++)
+                thrd_join(threads[i], NULL);
+            free((void *)threads);
+            free((void *)args);
+        }
 
-    free((void *)threads);
-    free((void *)args);
+#ifdef TALOS_DEBUG
+        uint64_t __talos_grid_end = talos_now_us();
+        uint64_t __talos_grid_end_cycles = talos_now_cycles();
+        talos_profile_record("generateGrid", (unsigned long long)(__talos_grid_end - __talos_grid_start), (unsigned long long)(__talos_grid_end_cycles - __talos_grid_start_cycles));
+        talos_profile_set_runinfo(height, width, length, seed, fulness);
+#endif
+        return grid;
+    }
 
-#ifdef cgsme_DEBUG
-    uint64_t __cgsme_grid_end = cgsme_now_us();
-    uint64_t __cgsme_grid_end_cycles = cgsme_now_cycles();
-    cgsme_profile_record("generateGrid", (unsigned long long)(__cgsme_grid_end - __cgsme_grid_start), (unsigned long long)(__cgsme_grid_end_cycles - __cgsme_grid_start_cycles));
-    cgsme_profile_set_runinfo(height, width, length, seed, fulness);
+    uint32_t baseAreaSize = (TALOS_NUM_ANCHORS > 0 && TALOS_ANCHOR_AREA_SIZE[0] >= 8) ? TALOS_ANCHOR_AREA_SIZE[0] : 20u;
+    uint32_t chunkSize = baseAreaSize;
+    if (width >= baseAreaSize * 4u && length >= baseAreaSize * 4u)
+        chunkSize = baseAreaSize * 2u;
+    if (chunkSize > 64u)
+        chunkSize = 64u;
+    if (width < chunkSize * 2u || length < chunkSize * 2u)
+    {
+        uint32_t minDim = (width < length) ? width : length;
+        uint32_t halfDim = minDim / 2u;
+        if (halfDim >= 6u && halfDim < chunkSize)
+            chunkSize = halfDim;
+    }
+
+    uint32_t chunksX = (width + chunkSize - 1u) / chunkSize;
+    uint32_t chunksY = (length + chunkSize - 1u) / chunkSize;
+    uint32_t totalChunks = chunksX * chunksY;
+
+    CheckerChunkTask *phaseTasks[4] = { NULL, NULL, NULL, NULL };
+    uint32_t phaseCounts[4] = { 0, 0, 0, 0 };
+    CheckerChunkTask *allTasks = malloc(sizeof(CheckerChunkTask) * totalChunks * 4u);
+    for (int p = 0; p < 4; p++)
+        phaseTasks[p] = &allTasks[(size_t)p * totalChunks];
+
+    for (uint32_t cy = 0; cy < chunksY; cy++)
+    {
+        uint32_t y0 = cy * chunkSize;
+        uint32_t y1 = (y0 + chunkSize < length) ? (y0 + chunkSize - 1u) : (length - 1u);
+        for (uint32_t cx = 0; cx < chunksX; cx++)
+        {
+            uint32_t x0 = cx * chunkSize;
+            uint32_t x1 = (x0 + chunkSize < width) ? (x0 + chunkSize - 1u) : (width - 1u);
+            uint32_t phase = (cx & 1u) | ((cy & 1u) << 1u);
+
+            uint32_t cSeed = seed ^ ((cx + 1u) * 0x9E3779B9u) ^ ((cy + 1u) * 0x85EBCA6Bu);
+            nextRandom(&cSeed);
+
+            phaseTasks[phase][phaseCounts[phase]++] = (CheckerChunkTask){
+                cx, cy, x0, y0, x1, y1, cSeed
+            };
+        }
+    }
+
+    uint32_t maxPhaseChunks = phaseCounts[0];
+    for (int p = 1; p < 4; p++)
+        if (phaseCounts[p] > maxPhaseChunks)
+            maxPhaseChunks = phaseCounts[p];
+
+    uint32_t nThreads = (maxPhaseChunks > height) ? maxPhaseChunks : height;
+    if (nThreads > 8u)
+        nThreads = 8u;
+    if ((uint64_t)width * length * height < 8192ULL)
+        nThreads = 1u;
+
+#ifdef TALOS_HAS_C11_ATOMICS
+    CheckerBarrier barrier;
+    checkerBarrierInit(&barrier, nThreads);
+
+    thrd_t workers[8];
+    CheckerPoolWorkerArgs poolArgs[8];
+
+    for (uint32_t w = 0; w < nThreads; w++)
+    {
+        poolArgs[w].grid = grid;
+        poolArgs[w].width = width;
+        poolArgs[w].length = length;
+        poolArgs[w].height = height;
+        poolArgs[w].seed = seed;
+        poolArgs[w].fulness = fulness;
+        poolArgs[w].workerId = w;
+        poolArgs[w].numWorkers = nThreads;
+        poolArgs[w].maxChunkW = chunkSize;
+        poolArgs[w].maxChunkL = chunkSize;
+        poolArgs[w].hasNatVert = hasNatVert;
+        for (int p = 0; p < 4; p++)
+        {
+            poolArgs[w].phaseTasks[p] = phaseTasks[p];
+            poolArgs[w].phaseCounts[p] = phaseCounts[p];
+        }
+        poolArgs[w].barrier = &barrier;
+    }
+
+    for (uint32_t w = 1; w < nThreads; w++)
+        thrd_create(&workers[w], runCheckerPoolWorker, &poolArgs[w]);
+
+    // main thread runs as worker 0
+    runCheckerPoolWorker(&poolArgs[0]);
+
+    for (uint32_t w = 1; w < nThreads; w++)
+        thrd_join(workers[w], NULL);
+#else
+    CheckerPoolWorkerArgs singleArg;
+    singleArg.grid = grid;
+    singleArg.width = width;
+    singleArg.length = length;
+    singleArg.height = height;
+    singleArg.seed = seed;
+    singleArg.fulness = fulness;
+    singleArg.workerId = 0u;
+    singleArg.numWorkers = 1u;
+    singleArg.maxChunkW = chunkSize;
+    singleArg.maxChunkL = chunkSize;
+    singleArg.hasNatVert = hasNatVert;
+    for (int p = 0; p < 4; p++)
+    {
+        singleArg.phaseTasks[p] = phaseTasks[p];
+        singleArg.phaseCounts[p] = phaseCounts[p];
+    }
+    runCheckerPoolWorker(&singleArg);
+#endif
+
+    free(allTasks);
+
+    if (hasNatVert)
+    {
+        for (uint32_t z = 0; z < height; z++)
+            for (uint32_t y = 0; y < length; y++)
+                for (uint32_t x = 0; x < width; x++)
+                    if (TALOS_POPCOUNT(grid[z][y][x]) > 1)
+                        grid[z][y][x] = TALOS_BIT(TALOS_CTZ(grid[z][y][x]));
+
+        uint32_t weldRng = seed ^ 0xA5A5F0F0u;
+        nextRandom(&weldRng);
+        finalize3DPipeTopology(grid, width, length, height, &weldRng);
+    }
+
+    // double check vertical connector alignment between z and z+1
+    if (height > 1 && TALOS_NUM_ANCHORS > 0)
+    {
+        for (uint32_t z = 0; z + 1 < height; z++)
+        {
+            for (uint32_t y = 1; y + 1 < length; y++)
+            {
+                for (uint32_t x = 1; x + 1 < width; x++)
+                {
+                    talos_tile_t loCell = grid[z][y][x];
+                    if (loCell == Empty_Tile || TALOS_POPCOUNT(loCell) != 1)
+                        continue;
+
+                    uint8_t loIdx = (uint8_t)TALOS_CTZ(loCell);
+                    talos_tile_t reqUp = TALOS_VERT_PROP_MASK[loIdx][VERT_IDX_UP];
+                    if (reqUp == All_Possible_State)
+                        continue;
+
+                    talos_tile_t hiCell = grid[z + 1][y][x];
+                    if (hiCell != Empty_Tile && (hiCell & reqUp) != Empty_Tile)
+                        continue;
+
+                    // if layer z+1 lost the receiver above a stair, downgrade it to its normal horizontal tile
+                    uint8_t fallbackIdx = TALOS_OPEN_LUT[loIdx][0];
+                    if (fallbackIdx != loIdx && (TALOS_VERT_PROP_MASK[fallbackIdx][VERT_IDX_UP] & hiCell) != Empty_Tile)
+                        grid[z][y][x] = TALOS_BIT(fallbackIdx);
+                    else if (hiCell == Empty_Tile && (TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_DOWN] & TALOS_BIT(fallbackIdx)) != Empty_Tile)
+                        grid[z][y][x] = TALOS_BIT(fallbackIdx);
+                }
+            }
+        }
+    }
+
+#ifdef TALOS_DEBUG
+    uint64_t __talos_grid_end = talos_now_us();
+    uint64_t __talos_grid_end_cycles = talos_now_cycles();
+    talos_profile_record("generateGrid", (unsigned long long)(__talos_grid_end - __talos_grid_start), (unsigned long long)(__talos_grid_end_cycles - __talos_grid_start_cycles));
+    talos_profile_set_runinfo(height, width, length, seed, fulness);
 #endif
 
     return grid;
 }
 
-void freeGrid(uint16_t ***grid, uint32_t width, uint32_t length, uint32_t height)
+
+void freeGrid(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height)
 {
-    CGSME_PROFILE_FUNC();
+    TALOS_PROFILE_FUNC();
     if (grid != NULL)
     {
         // grid[0] contains the pointer to all_rows
         if (grid[0] != NULL)
         {
             // grid[0][0] contains the pointer to all_data
-            free((void *)grid[0][0]); 
+            free((void *)grid[0][0]);
         }
-        
+
         free((void *)grid[0]); // free all_rows
         free((void *)grid);    // free the top level grid pointer
     }
 }
 
-void cleanGrid(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
-{
-    CGSME_PROFILE_FUNC();
-
-    // recursive algorithm where we flip all the bits to mark it as visited
-
-    // base case if we leave the grid
-    //  __builtin_popcount(gridLayer[y][x]) > 1
-    //  all the already collapsed 16 corridors can be 0 1 10 100 1000 10000 and so on...
-    //  so if the popcount is more than 1 it means its not collapsed yet, skip that (should not happen but just in case)
-    if (x >= width || x < 0 || y >= length || y < 0 || __builtin_popcount((unsigned)gridLayer[y][x]) > 1)
-        return;
-
-    uint16_t tmp = gridLayer[y][x];
-    gridLayer[y][x] = ~gridLayer[y][x];
-
-    // if the direction is open then we recursively keep going else return
-    if (tmp & South_Open_Mask)
-        cleanGrid(gridLayer, width, length, x, y - 1);
-    if (tmp & North_Open_Mask)
-        cleanGrid(gridLayer, width, length, x, y + 1);
-    if (tmp & West_Open_Mask)
-        cleanGrid(gridLayer, width, length, x + 1, y);
-    if (tmp & East_Open_Mask)
-        cleanGrid(gridLayer, width, length, x - 1, y);
-}
-
-void updateTileEntropy(uint16_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
-{
-    CGSME_PROFILE_FUNC();
-
-    uint16_t northMask = All_Possible_State;
-    uint16_t eastMask = All_Possible_State;
-    uint16_t southMask = All_Possible_State;
-    uint16_t westMask = All_Possible_State;
-
-    if (y != 0 && __builtin_popcount(gridLayer[y - 1][x]) == 1)
-        northMask = South_Open_Mask;
-    if (y != length - 1 && __builtin_popcount(gridLayer[y + 1][x]) == 1)
-        southMask = North_Open_Mask;
-    if (x != 0 && __builtin_popcount(gridLayer[y][x - 1]) == 1)
-        westMask = East_Open_Mask;
-    if (x != width - 1 && __builtin_popcount(gridLayer[y][x + 1]) == 1)
-        eastMask = West_Open_Mask;
-
-    gridLayer[y][x] &= northMask & southMask & eastMask & westMask;
-}

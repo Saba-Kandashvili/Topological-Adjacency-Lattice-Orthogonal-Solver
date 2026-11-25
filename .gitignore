@@ -3,4 +3,23 @@ build~/
 CMakeCache.txt
 CMakeFiles/
 *.user
-cgsme_debug.log
+talos_debug.log
+
+# Auto-generated tileset headers and codegen binaries
+talos_tileset_baked.h
+*_baked.h
+talos_codegen
+talos_codegen.exe
+debug_gen
+debug_gen.exe
+talos_tests
+talos_tests.exe
+maze.txt
+debug_mask.txt
+debug_noise.txt
+*.dll
+*.so
+*.dylib
+tilesets/*
+!tilesets/pipes_3d_v1.json
+maze_texture.png
