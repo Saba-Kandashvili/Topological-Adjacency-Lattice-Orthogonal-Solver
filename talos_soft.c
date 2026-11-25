@@ -1,7 +1,7 @@
-// compiles the engine a second time with CGSME_SOFT_MODE=1 (uint64_t carrier + runtime json LUTs)
+// compiles the engine a second time with TALOS_SOFT_MODE=1 (uint64_t carrier + runtime json LUTs)
 // separate translation unit so baked generateGrid has zero runtime overhead
 
-#define CGSME_SOFT_MODE 1
+#define TALOS_SOFT_MODE 1
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -15,22 +15,22 @@
 #endif
 
 #include "threadRandom.h"
-#include "cgsme_debug.h"
+#include "talos_debug.h"
 #include "tinycthread/tinycthread.h"
-#include "cgsme_soft.h"
+#include "talos_soft.h"
 
-CgsmeRuleset g_cgsme_soft_ruleset;
+TalosRuleset g_talos_soft_ruleset;
 
-bool cgsme_soft_load_ruleset(const char *json_path)
+bool talos_soft_load_ruleset(const char *json_path)
 {
     if (!json_path || !json_path[0])
         return false;
-    return cgsme_ruleset_load_from_file(json_path, &g_cgsme_soft_ruleset);
+    return talos_ruleset_load_from_file(json_path, &g_talos_soft_ruleset);
 }
 
-const CgsmeRuleset *cgsme_soft_get_ruleset(void)
+const TalosRuleset *talos_soft_get_ruleset(void)
 {
-    return &g_cgsme_soft_ruleset;
+    return &g_talos_soft_ruleset;
 }
 
 // rename non-static symbols with _Soft so they dont clash with baked build
@@ -89,8 +89,8 @@ const CgsmeRuleset *cgsme_soft_get_ruleset(void)
 #define generateGrid                        generateGrid_Soft
 #define freeGrid                            freeGrid_Soft
 
-#include "cgsme_utils.c"
-#include "cgsme_noise.c"
-#include "cgsme_solver.c"
-#include "cgsme_topology.c"
+#include "talos_utils.c"
+#include "talos_noise.c"
+#include "talos_solver.c"
+#include "talos_topology.c"
 #include "generator.c"

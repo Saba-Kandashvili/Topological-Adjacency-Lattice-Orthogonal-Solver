@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <string.h>
 #include "generator.h"
-#include "cgsme_soft.h"
-#include "cgsme_debug.h"
+#include "talos_soft.h"
+#include "talos_debug.h"
 #include <time.h>
 
 static void print_usage(const char *prog)
@@ -17,8 +17,8 @@ static void print_usage(const char *prog)
            "  --seed N|random    rng seed (default: 5)\n"
            "  -f, --fullness N   target fullness 1..100 (default: 70)\n"
            "  -s, --soft PATH    load tileset json at runtime instead of baked\n"
-           "  -d, --cgsme-debug  enable profiling log\n"
-           "  --cgsme-debug-quick benchmark timing only (no maze.txt write)\n"
+           "  -d, --talos-debug  enable profiling log\n"
+           "  --talos-debug-quick benchmark timing only (no maze.txt write)\n"
            "  --help             show this message\n",
            prog);
 }
@@ -55,8 +55,8 @@ int main(int argc, char **argv)
 {
     // parse cli flags
     setbuf(stdout, NULL);
-    bool cgsme_debug_enabled = false;
-    bool cgsme_quick = false;
+    bool talos_debug_enabled = false;
+    bool talos_quick = false;
     const char *soft_tileset_path = NULL;
 
     uint32_t width = 25;
@@ -64,9 +64,9 @@ int main(int argc, char **argv)
     uint32_t height = 10;
     uint32_t seed = 5;
     uint32_t fulness = 70;
-    uint64_t cgsme_profile_us_th = 0;
-    uint64_t cgsme_profile_cycles_th = 0;
-    double cgsme_profile_warn_pct = 0.0;
+    uint64_t talos_profile_us_th = 0;
+    uint64_t talos_profile_cycles_th = 0;
+    double talos_profile_warn_pct = 0.0;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -78,10 +78,10 @@ int main(int argc, char **argv)
             print_usage(argv[0]);
             return 0;
         }
-        else if (strcmp(a, "--cgsme-debug") == 0 || strcmp(a, "-d") == 0)
-            cgsme_debug_enabled = true;
-        else if (strcmp(a, "--cgsme-debug-quick") == 0)
-            cgsme_quick = true;
+        else if (strcmp(a, "--talos-debug") == 0 || strcmp(a, "-d") == 0)
+            talos_debug_enabled = true;
+        else if (strcmp(a, "--talos-debug-quick") == 0)
+            talos_quick = true;
         else if ((strcmp(a, "--soft") == 0 || strcmp(a, "-s") == 0) && i + 1 < argc)
             soft_tileset_path = argv[++i];
         else if (strncmp(a, "--soft=", 7) == 0)
@@ -138,12 +138,12 @@ int main(int argc, char **argv)
             parse_u32(a + 11, &fulness);
         else if (strncmp(a, "--fulness=", 10) == 0)
             parse_u32(a + 10, &fulness);
-        else if (strncmp(a, "--cgsme-profile-threshold-us=", 29) == 0)
-            cgsme_profile_us_th = (uint64_t)strtoull(a + 29, NULL, 10);
-        else if (strncmp(a, "--cgsme-profile-threshold-cycles=", 33) == 0)
-            cgsme_profile_cycles_th = (uint64_t)strtoull(a + 33, NULL, 10);
-        else if (strncmp(a, "--cgsme-profile-warning-pct=", 28) == 0)
-            cgsme_profile_warn_pct = strtod(a + 28, NULL);
+        else if (strncmp(a, "--talos-profile-threshold-us=", 29) == 0)
+            talos_profile_us_th = (uint64_t)strtoull(a + 29, NULL, 10);
+        else if (strncmp(a, "--talos-profile-threshold-cycles=", 33) == 0)
+            talos_profile_cycles_th = (uint64_t)strtoull(a + 33, NULL, 10);
+        else if (strncmp(a, "--talos-profile-warning-pct=", 28) == 0)
+            talos_profile_warn_pct = strtod(a + 28, NULL);
     }
 
     if (fulness > 100)
@@ -154,47 +154,47 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (cgsme_quick)
+    if (talos_quick)
     {
-        cgsme_set_quick_mode(true);
+        talos_set_quick_mode(true);
     }
     else
     {
-        cgsme_init_debug();
-        if (cgsme_debug_enabled)
-            cgsme_set_enabled(true);
+        talos_init_debug();
+        if (talos_debug_enabled)
+            talos_set_enabled(true);
     }
 
-    if (cgsme_profile_us_th || cgsme_profile_cycles_th)
-        cgsme_profile_set_thresholds(cgsme_profile_us_th, cgsme_profile_cycles_th);
-    if (cgsme_profile_warn_pct > 0.0)
-        cgsme_profile_set_warning_percent(cgsme_profile_warn_pct);
+    if (talos_profile_us_th || talos_profile_cycles_th)
+        talos_profile_set_thresholds(talos_profile_us_th, talos_profile_cycles_th);
+    if (talos_profile_warn_pct > 0.0)
+        talos_profile_set_warning_percent(talos_profile_warn_pct);
 
     printf("Generating %ux%ux%u Maze (Seed: %u, Fullness: %u%%)...\n", width, length, height, seed, fulness);
 
     if (soft_tileset_path)
     {
-        if (!cgsme_soft_load_ruleset(soft_tileset_path))
+        if (!talos_soft_load_ruleset(soft_tileset_path))
         {
             fprintf(stderr, "ERROR: [Soft Mode] Failed to load ruleset from '%s'\n", soft_tileset_path);
             return 1;
         }
-        const CgsmeRuleset *r = cgsme_soft_get_ruleset();
+        const TalosRuleset *r = talos_soft_get_ruleset();
         printf("[Soft Mode] Loaded ruleset '%s' (%u tiles, universal uint64_t carrier) from %s\n",
                r->name, r->num_tiles, soft_tileset_path);
     }
 
     // generate
-    if (cgsme_quick)
+    if (talos_quick)
     {
-        uint64_t start_us = cgsme_now_us();
-        cgsme_tile_t ***grid = NULL;
+        uint64_t start_us = talos_now_us();
+        talos_tile_t ***grid = NULL;
         uint64_t ***soft_grid = NULL;
         if (soft_tileset_path)
             soft_grid = generateGrid_Soft(width, length, height, seed, fulness);
         else
             grid = generateGrid(width, length, height, seed, fulness);
-        uint64_t end_us = cgsme_now_us();
+        uint64_t end_us = talos_now_us();
 
         if (grid || soft_grid)
         {
@@ -236,7 +236,7 @@ int main(int argc, char **argv)
     }
     else
     {
-        cgsme_tile_t ***grid = NULL;
+        talos_tile_t ***grid = NULL;
         uint64_t ***soft_grid = NULL;
         if (soft_tileset_path)
             soft_grid = generateGrid_Soft(width, length, height, seed, fulness);
@@ -286,7 +286,7 @@ int main(int argc, char **argv)
         {
             printf("ERROR: generateGrid returned NULL!\n");
         }
-        cgsme_shutdown_debug();
+        talos_shutdown_debug();
     }
 
     return 0;

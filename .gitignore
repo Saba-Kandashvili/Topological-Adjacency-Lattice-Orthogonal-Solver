@@ -3,17 +3,17 @@ build~/
 CMakeCache.txt
 CMakeFiles/
 *.user
-cgsme_debug.log
+talos_debug.log
 
 # Auto-generated tileset headers and codegen binaries
-cgsme_tileset_baked.h
+talos_tileset_baked.h
 *_baked.h
-cgsme_codegen
-cgsme_codegen.exe
+talos_codegen
+talos_codegen.exe
 debug_gen
 debug_gen.exe
-cgsme_tests
-cgsme_tests.exe
+talos_tests
+talos_tests.exe
 maze.txt
 debug_mask.txt
 debug_noise.txt

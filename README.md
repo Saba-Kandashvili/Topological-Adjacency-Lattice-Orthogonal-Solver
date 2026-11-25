@@ -1,6 +1,6 @@
-# CGSME (Coherent Guided Stochastic Maze Engine)
+# TALOS (Topological Adjacency Lattice & Orthogonal Solver)
 
-Fast, multithreaded 2D/3D Wave Function Collapse and maze topology engine written in C11. Originally built as the native map generation backend for **Escape from Ganivi**, now generalized into a data-driven 6-directional (`N, E, S, W, U, D`) solver.
+Fast, multithreaded 2D/3D Wave Function Collapse and topology solver written in C11. Originally built as the native map generation backend for **Escape from Ganivi**, now generalized into a data-driven 6-directional (`N, E, S, W, U, D`) lattice and network solver.
 
 <p align="center">
   <img width="48%" alt="3D Corridor Maze" src="debug/shot_3d_maze.png" />
@@ -12,12 +12,12 @@ Fast, multithreaded 2D/3D Wave Function Collapse and maze topology engine writte
 
 ## How It Works
 
-Standard WFC fills a grid until it hits a contradiction and either backtracks exponentially or crashes, and it has no concept of global path connectivity. CGSME splits local constraint solving from global graph repair so generation runs in strict linear $O(V / P)$ time.
+Standard WFC fills a grid until it hits a contradiction and either backtracks exponentially or crashes, and it has no concept of global path connectivity. TALOS splits local constraint solving from global graph repair so generation runs in strict linear $O(V / P)$ time.
 
-### 1. JSON Rulesets & Compile-Time Baking (`cgsme_codegen`)
+### 1. JSON Rulesets & Compile-Time Baking (`talos_codegen`)
 Tile rules, sockets (`N, E, S, W, U, D`), category spawn curves, and vertical area quotas are defined in [`tileset.json`](tileset.json) (a 63-tile 3D pipes example is also included in [`tilesets/pipes_3d_v1.json`](tilesets/pipes_3d_v1.json)).
-* **Baked Mode (`.dll` / `.so`):** At build time, `cgsme_codegen` pre-solves the socket graph into flat bitmask lookup tables (`CGSME_PROP_MASK`, `CGSME_VERT_PROP_MASK`, `CGSME_OPEN_LUT`, `CGSME_CLOSE_LUT`) in `cgsme_tileset_baked.h` and picks the smallest unsigned integer container (`uint8_t`, `uint16_t`, `uint32_t`, or `uint64_t`) that fits the tile count. Zero file I/O or JSON parsing at runtime.
-* **Soft Mode (`generateGrid_Soft` / `--soft`):** Compiles a second separate translation unit (`cgsme_soft.c`) using a universal `uint64_t` carrier so you can load any JSON ruleset at runtime with bit-for-bit identical output. Because it is a separate compilation unit with its own `_Soft` symbols, baked `generateGrid()` pays zero runtime overhead when you don't use soft mode.
+* **Baked Mode (`.dll` / `.so`):** At build time, `talos_codegen` pre-solves the socket graph into flat bitmask lookup tables (`TALOS_PROP_MASK`, `TALOS_VERT_PROP_MASK`, `TALOS_OPEN_LUT`, `TALOS_CLOSE_LUT`) in `talos_tileset_baked.h` and picks the smallest unsigned integer container (`uint8_t`, `uint16_t`, `uint32_t`, or `uint64_t`) that fits the tile count. Zero file I/O or JSON parsing at runtime.
+* **Soft Mode (`generateGrid_Soft` / `--soft`):** Compiles a second separate translation unit (`talos_soft.c`) using a universal `uint64_t` carrier so you can load any JSON ruleset at runtime with bit-for-bit identical output. Because it is a separate compilation unit with its own `_Soft` symbols, baked `generateGrid()` pays zero runtime overhead when you don't use soft mode.
 
 ### 2. Ridged Noise Masking & Cavity Pruning
 When `fulness < 100%`, the engine carves an organic silhouette before WFC runs:
@@ -28,7 +28,7 @@ When `fulness < 100%`, the engine carves an organic silhouette before WFC runs:
 ### 3. Stratified Area Quotas (`runArchitect`)
 Before spawning solver threads, the Architect enforces `"vertical_rules"` / `"area_quotas"` from the JSON ruleset:
 * Splits each layer into $N \times N$ sectors and places the required number of vertical connectors (e.g. stairs) per sector while respecting minimum spacing and `allow_stacking`.
-* Clamps the cells above and below through `CGSME_VERT_PROP_MASK` (for example forcing `Normal_X_Corridor` above `Special_X_Corridor` and blocking stairs on the top floor).
+* Clamps the cells above and below through `TALOS_VERT_PROP_MASK` (for example forcing `Normal_X_Corridor` above `Special_X_Corridor` and blocking stairs on the top floor).
 * Guarantees at least one valid connection between every adjacent floor `z` and `z + 1`.
 
 ### 4. 4-Color Checkerboard 3D Column WFC
@@ -40,8 +40,8 @@ Instead of running one thread per layer (which leaves cores idle on 1-layer maps
 
 ### 5. Ariadne Topological Welder
 After WFC finishes, disconnected regions are welded into a single 100%-traversable graph:
-* **Seam & Boundary Healing:** `CGSME_CLOSE_LUT` and `CGSME_OPEN_LUT` close any ports facing Void/map borders and make interior walls symmetric in $O(1)$ per cell.
-* **1-Bit Ariadne Quotient-Prim Welder:** Replaces Kruskal/Union-Find region IDs with a single in-place visited bit (`CGSME_VISITED_BIT`). Expands connected regions via BFS and punches walls across the frontier until 100% of the map (in 2.5D layers or full 6D 3D pipe networks) is reachable.
+* **Seam & Boundary Healing:** `TALOS_CLOSE_LUT` and `TALOS_OPEN_LUT` close any ports facing Void/map borders and make interior walls symmetric in $O(1)$ per cell.
+* **1-Bit Ariadne Quotient-Prim Welder:** Replaces Kruskal/Union-Find region IDs with a single in-place visited bit (`TALOS_VISITED_BIT`). Expands connected regions via BFS and punches walls across the frontier until 100% of the map (in 2.5D layers or full 6D 3D pipe networks) is reachable.
 
 ---
 
@@ -130,31 +130,31 @@ cmake --build .
 ```
 
 CMake options:
-* `-DCGSME_TILESET_FILE=path/to/custom.json`: bake a different JSON tileset into the shared library at build time (default: `tileset.json`)
-* `-DCGSME_ENABLE_SOFT=ON|OFF`: include the runtime `--soft` JSON API (`cgsme_soft_load_ruleset` / `generateGrid_Soft`) in the shared library (default: `ON`, zero performance impact on baked `generateGrid`)
-* `-DCGSME_BUILD_CLI=ON`: also build the standalone `debug_gen` CLI executable
-* `-DCGSME_BUILD_TESTS=ON`: build the verification & benchmark test suite (`cgsme_tests`, runnable via `ctest`)
+* `-DTALOS_TILESET_FILE=path/to/custom.json`: bake a different JSON tileset into the shared library at build time (default: `tileset.json`)
+* `-DTALOS_ENABLE_SOFT=ON|OFF`: include the runtime `--soft` JSON API (`talos_soft_load_ruleset` / `generateGrid_Soft`) in the shared library (default: `ON`, zero performance impact on baked `generateGrid`)
+* `-DTALOS_BUILD_CLI=ON`: also build the standalone `debug_gen` CLI executable
+* `-DTALOS_BUILD_TESTS=ON`: build the verification & benchmark test suite (`talos_tests`, runnable via `ctest`)
 
 ---
 
 ## C API & Bindings
 
-`generateGrid` returns a 3D array `grid[z][y][x]` of `cgsme_tile_t` (`uint16_t` for the default 16-tile ruleset). `0` (`Empty_Tile`) is Void; any non-zero value is a single set bit (`1 << tile_id`). All cells live in one contiguous flat buffer starting at `grid[0][0]`.
+`generateGrid` returns a 3D array `grid[z][y][x]` of `talos_tile_t` (`uint16_t` for the default 16-tile ruleset). `0` (`Empty_Tile`) is Void; any non-zero value is a single set bit (`1 << tile_id`). All cells live in one contiguous flat buffer starting at `grid[0][0]`.
 
 ### C (Baked & Runtime Soft Mode)
 ```c
 #include "generator.h"
-#include "cgsme_soft.h" // only needed if loading JSON at runtime
+#include "talos_soft.h" // only needed if loading JSON at runtime
 
 // Baked mode (zero runtime overhead, uses tileset baked at build time)
-cgsme_tile_t ***map = generateGrid(50, 50, 5, 12345, 70);
+talos_tile_t ***map = generateGrid(50, 50, 5, 12345, 70);
 if (map) {
-    cgsme_tile_t tile = map[0][10][10];
+    talos_tile_t tile = map[0][10][10];
     freeGrid(map, 50, 50, 5);
 }
 
 // Soft mode (load any JSON ruleset at runtime into a uint64_t grid)
-if (cgsme_soft_load_ruleset("tilesets/pipes_3d_v1.json")) {
+if (talos_soft_load_ruleset("tilesets/pipes_3d_v1.json")) {
     uint64_t ***pipes = generateGrid_Soft(25, 25, 6, 42, 70);
     if (pipes) {
         uint64_t tile = pipes[0][10][10];
@@ -170,10 +170,10 @@ using System.Runtime.InteropServices;
 
 public class MazeGen
 {
-    [DllImport("libCGSME")]
+    [DllImport("libTALOS")]
     private static extern IntPtr generateGrid(uint width, uint length, uint height, uint seed, uint fullness);
 
-    [DllImport("libCGSME")]
+    [DllImport("libTALOS")]
     private static extern void freeGrid(IntPtr grid, uint width, uint length, uint height);
 
     public void Create()
@@ -194,7 +194,7 @@ public class MazeGen
 import ctypes
 from ctypes import c_uint32, c_uint16, POINTER
 
-lib = ctypes.CDLL("./libCGSME.so")  # Windows: ./libCGSME.dll
+lib = ctypes.CDLL("./libTALOS.so")  # Windows: ./libTALOS.dll
 
 ThreeDArray = POINTER(POINTER(POINTER(c_uint16)))
 lib.generateGrid.restype = ThreeDArray
@@ -224,7 +224,7 @@ The [`debug/`](debug) folder contains the standalone CLI runner (`debug/main.c`)
 ./debug/debug.sh --soft tilesets/pipes_3d_v1.json --size 25x25x6 --seed 5 -f 70
 ```
 
-CLI flags: `--size WxLxH` (or `-w`, `-l`, `-z`/`--layers`), `--seed N|random`, `-f`/`--fullness N`, `-s`/`--soft PATH`, `-d`/`--cgsme-debug`, `--cgsme-debug-quick`, `--help`.
+CLI flags: `--size WxLxH` (or `-w`, `-l`, `-z`/`--layers`), `--seed N|random`, `-f`/`--fullness N`, `-s`/`--soft PATH`, `-d`/`--talos-debug`, `--talos-debug-quick`, `--help`.
 
 **Visualizer Controls:**
 * `V` / `3`: Toggle 3D Orbit View / 2D Slice View (LMB drag to orbit, RMB drag to pan, wheel to zoom)
@@ -239,14 +239,14 @@ CLI flags: `--size WxLxH` (or `-w`, `-l`, `-z`/`--layers`), `--seed N|random`, `
 
 ## Tests & Benchmarks (`tests/`)
 
-[`tests/test_cgsme.c`](tests/test_cgsme.c) verifies Baked vs. Soft bit-for-bit parity, 2D/3D socket validity, 6-face Void closure, stair alignment, and 100% 3D flood-fill reachability across `100%`, `70%`, and `45%` fullness on both `tileset.json` and `tilesets/pipes_3d_v1.json`.
+[`tests/test_talos.c`](tests/test_talos.c) verifies Baked vs. Soft bit-for-bit parity, 2D/3D socket validity, 6-face Void closure, stair alignment, and 100% 3D flood-fill reachability across `100%`, `70%`, and `45%` fullness on both `tileset.json` and `tilesets/pipes_3d_v1.json`.
 
-Run via CMake (`-DCGSME_BUILD_TESTS=ON` + `ctest`) or directly with `gcc`:
+Run via CMake (`-DTALOS_BUILD_TESTS=ON` + `ctest`) or directly with `gcc`:
 
 ```bash
-gcc -std=c11 -O3 -D_GNU_SOURCE tests/test_cgsme.c generator.c cgsme_debug.c cgsme_utils.c cgsme_noise.c cgsme_topology.c cgsme_solver.c cgsme_ruleset.c cgsme_soft.c tinycthread/tinycthread.c -I. -Itinycthread -lm -lpthread -o cgsme_tests
-./cgsme_tests          # full 5-seed benchmark + verification
-./cgsme_tests --quick  # 1-seed fast sanity check
+gcc -std=c11 -O3 -D_GNU_SOURCE tests/test_talos.c generator.c talos_debug.c talos_utils.c talos_noise.c talos_topology.c talos_solver.c talos_ruleset.c talos_soft.c tinycthread/tinycthread.c -I. -Itinycthread -lm -lpthread -o talos_tests
+./talos_tests          # full 5-seed benchmark + verification
+./talos_tests --quick  # 1-seed fast sanity check
 ```
 
 ### Performance & Complexity

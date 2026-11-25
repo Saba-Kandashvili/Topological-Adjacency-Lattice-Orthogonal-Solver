@@ -1,6 +1,6 @@
-#ifdef cgsme_DEBUG
+#ifdef TALOS_DEBUG
 
-#include "cgsme_debug.h"
+#include "talos_debug.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -52,17 +52,17 @@ static struct
 // Quick mode flag (minimize overhead when benchmarking)
 static int g_quick_mode = 0;
 
-void cgsme_set_quick_mode(bool enabled)
+void talos_set_quick_mode(bool enabled)
 {
     g_quick_mode = enabled ? 1 : 0;
 }
 
-bool cgsme_quick_mode_enabled(void)
+bool talos_quick_mode_enabled(void)
 {
     return g_quick_mode != 0;
 }
 
-void cgsme_init_debug(void)
+void talos_init_debug(void)
 {
     if (g_logmtx_active)
         return; // already init
@@ -76,7 +76,7 @@ void cgsme_init_debug(void)
     g_logmtx_active = 1;
 
     // open a logfile next to running binary
-    g_logfile = fopen("cgsme_debug.log", "a");
+    g_logfile = fopen("talos_debug.log", "a");
     if (!g_logfile)
     {
         // fallback to stdout
@@ -87,10 +87,10 @@ void cgsme_init_debug(void)
     g_enabled = 0;
 }
 
-void cgsme_profile_set_thresholds(uint64_t us_threshold, uint64_t cycles_threshold)
+void talos_profile_set_thresholds(uint64_t us_threshold, uint64_t cycles_threshold)
 {
     if (!g_logmtx_active)
-        cgsme_init_debug();
+        talos_init_debug();
     if (!g_logmtx_active)
         return;
     mtx_lock(&g_logmtx);
@@ -99,10 +99,10 @@ void cgsme_profile_set_thresholds(uint64_t us_threshold, uint64_t cycles_thresho
     mtx_unlock(&g_logmtx);
 }
 
-void cgsme_profile_set_warning_percent(double pct)
+void talos_profile_set_warning_percent(double pct)
 {
     if (!g_logmtx_active)
-        cgsme_init_debug();
+        talos_init_debug();
     if (!g_logmtx_active)
         return;
     mtx_lock(&g_logmtx);
@@ -110,10 +110,10 @@ void cgsme_profile_set_warning_percent(double pct)
     mtx_unlock(&g_logmtx);
 }
 
-void cgsme_profile_set_runinfo(uint32_t layers, uint32_t width, uint32_t length, uint32_t seed, uint32_t fulness)
+void talos_profile_set_runinfo(uint32_t layers, uint32_t width, uint32_t length, uint32_t seed, uint32_t fulness)
 {
     if (!g_logmtx_active)
-        cgsme_init_debug();
+        talos_init_debug();
     if (!g_logmtx_active)
         return;
     mtx_lock(&g_logmtx);
@@ -127,7 +127,7 @@ void cgsme_profile_set_runinfo(uint32_t layers, uint32_t width, uint32_t length,
 }
 
 // Helper: strdup fallback
-static char *cgsme_strdup(const char *s)
+static char *talos_strdup(const char *s)
 {
     if (!s)
         return NULL;
@@ -139,7 +139,7 @@ static char *cgsme_strdup(const char *s)
 }
 
 // Find or create profile entry under mutex
-static ProfileEntry *cgsme_profile_find_or_create(const char *name)
+static ProfileEntry *talos_profile_find_or_create(const char *name)
 {
     // assume mutex is held
     for (size_t i = 0; i < g_profile_count; ++i)
@@ -158,7 +158,7 @@ static ProfileEntry *cgsme_profile_find_or_create(const char *name)
         g_profile_capacity = newcap;
     }
     ProfileEntry *p = &g_profiles[g_profile_count++];
-    p->name = cgsme_strdup(name);
+    p->name = talos_strdup(name);
     p->count = 0;
     p->total_us = 0;
     p->min_us = (uint64_t)-1;
@@ -169,10 +169,10 @@ static ProfileEntry *cgsme_profile_find_or_create(const char *name)
     return p;
 }
 
-void cgsme_profile_record(const char *name, uint64_t elapsed_us, uint64_t elapsed_cycles)
+void talos_profile_record(const char *name, uint64_t elapsed_us, uint64_t elapsed_cycles)
 {
     if (!g_logmtx_active)
-        cgsme_init_debug();
+        talos_init_debug();
     if (!g_logmtx_active)
         return;
 
@@ -180,7 +180,7 @@ void cgsme_profile_record(const char *name, uint64_t elapsed_us, uint64_t elapse
         return;
 
     mtx_lock(&g_logmtx);
-    ProfileEntry *p = cgsme_profile_find_or_create(name);
+    ProfileEntry *p = talos_profile_find_or_create(name);
     if (p)
     {
         p->count++;
@@ -202,8 +202,8 @@ void cgsme_profile_record(const char *name, uint64_t elapsed_us, uint64_t elapse
         {
             if (g_logfile)
             {
-                uint64_t ms = cgsme_now_us() / 1000ULL;
-                fprintf(g_logfile, "[cgsme %llu ms] [WARNING] %s elapsed=%llu us cycles=%llu\n", (unsigned long long)ms,
+                uint64_t ms = talos_now_us() / 1000ULL;
+                fprintf(g_logfile, "[talos %llu ms] [WARNING] %s elapsed=%llu us cycles=%llu\n", (unsigned long long)ms,
                         name, (unsigned long long)elapsed_us, (unsigned long long)elapsed_cycles);
                 fflush(g_logfile);
             }
@@ -223,7 +223,7 @@ static int profile_entry_cmp(const void *a, const void *b)
     return 0;
 }
 
-void cgsme_shutdown_debug(void)
+void talos_shutdown_debug(void)
 {
     if (!g_logmtx_active)
         return;
@@ -232,7 +232,7 @@ void cgsme_shutdown_debug(void)
     mtx_lock(&g_logmtx);
     if (g_profile_count > 0 && g_logfile)
     {
-        fprintf(g_logfile, "\n[cgsme] Profiling summary (%zu entries):\n", g_profile_count);
+        fprintf(g_logfile, "\n[talos] Profiling summary (%zu entries):\n", g_profile_count);
         uint64_t total_us = 0;
         uint64_t total_cycles = 0;
         for (size_t i = 0; i < g_profile_count; ++i)
@@ -362,10 +362,10 @@ void cgsme_shutdown_debug(void)
     g_logmtx_active = 0;
 }
 
-void cgsme_set_enabled(bool enabled)
+void talos_set_enabled(bool enabled)
 {
     if (!g_logmtx_active)
-        cgsme_init_debug();
+        talos_init_debug();
 
     if (!g_logmtx_active)
         return;
@@ -375,7 +375,7 @@ void cgsme_set_enabled(bool enabled)
     mtx_unlock(&g_logmtx);
 }
 
-bool cgsme_get_enabled(void)
+bool talos_get_enabled(void)
 {
     if (!g_logmtx_active)
         return false;
@@ -386,7 +386,7 @@ bool cgsme_get_enabled(void)
     return val != 0;
 }
 
-uint64_t cgsme_now_us(void)
+uint64_t talos_now_us(void)
 {
 #ifdef _WIN32
     static LARGE_INTEGER freq = {0};
@@ -403,7 +403,7 @@ uint64_t cgsme_now_us(void)
 #endif
 }
 
-uint64_t cgsme_now_cycles(void)
+uint64_t talos_now_cycles(void)
 {
 #if defined(__i386__) || defined(__x86_64__)
     unsigned int lo, hi;
@@ -414,11 +414,11 @@ uint64_t cgsme_now_cycles(void)
 #endif
 }
 
-void cgsme_log(const char *fmt, ...)
+void talos_log(const char *fmt, ...)
 {
     if (!g_logmtx_active) // quick exit if not initialised
     {
-        cgsme_init_debug();
+        talos_init_debug();
         if (!g_logmtx_active)
             return;
     }
@@ -433,9 +433,9 @@ void cgsme_log(const char *fmt, ...)
         g_logfile = stdout;
 
     // print timestamp prefix
-    uint64_t now = cgsme_now_us();
+    uint64_t now = talos_now_us();
     uint64_t ms = now / 1000ULL;
-    fprintf(g_logfile, "[cgsme %llu ms] ", (unsigned long long)ms);
+    fprintf(g_logfile, "[talos %llu ms] ", (unsigned long long)ms);
 
     va_list ap;
     va_start(ap, fmt);
@@ -448,4 +448,4 @@ void cgsme_log(const char *fmt, ...)
     mtx_unlock(&g_logmtx);
 }
 
-#endif // cgsme_DEBUG
+#endif // TALOS_DEBUG

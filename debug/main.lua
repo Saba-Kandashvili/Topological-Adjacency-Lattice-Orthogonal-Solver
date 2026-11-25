@@ -966,7 +966,7 @@ function discoverTilesets()
         list[#list + 1] = norm
     end
 
-    local envPath = os.getenv("CGSME_TILESET")
+    local envPath = os.getenv("TALOS_TILESET")
     if envPath and envPath ~= "" then
         local normEnv = normalizePath(envPath)
         seen[normEnv] = true
@@ -1020,7 +1020,7 @@ function discoverTilesets()
 end
 
 function loadRuleset(explicitPath)
-    local path = explicitPath or (discoveredTilesets[activeTilesetIdx]) or os.getenv("CGSME_TILESET") or DEFAULT_TILESET_FILE
+    local path = explicitPath or (discoveredTilesets[activeTilesetIdx]) or os.getenv("TALOS_TILESET") or DEFAULT_TILESET_FILE
     local raw = readTextFile(path)
 
     if not raw and path ~= DEFAULT_TILESET_FILE and not explicitPath then
@@ -1774,7 +1774,7 @@ end
 -- =================================================
 
 function love.load()
-    love.window.setTitle("CGSME Inspector (Multi-Tileset Visualizer & Parts Kit)")
+    love.window.setTitle("TALOS Inspector (Multi-Tileset Visualizer & Parts Kit)")
     love.window.setMode(1000, 1000, {resizable = true})
     love.graphics.setBackgroundColor(WINDOW_BG_COLOR)
 

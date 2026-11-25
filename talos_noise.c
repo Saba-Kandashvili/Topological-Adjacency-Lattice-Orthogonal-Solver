@@ -1,5 +1,5 @@
-#include "cgsme_noise.h"
-#include "cgsme_utils.h"
+#include "talos_noise.h"
+#include "talos_utils.h"
 #include "tiles.h"
 #include <string.h>
 
@@ -53,7 +53,7 @@ float getValueNoise(float x, float y, uint32_t seed)
 }
 
 static int measureRegionSizeWithQueue(
-    cgsme_tile_t ***grid, bool *visited, int width, int length, int startX, int startY, Point2D *queue)
+    talos_tile_t ***grid, bool *visited, int width, int length, int startX, int startY, Point2D *queue)
 {
     int count = 0;
     int head = 0;
@@ -92,7 +92,7 @@ static int measureRegionSizeWithQueue(
 }
 
 // BFS to count the size of a region (non-recursive to avoid stack issues)
-int measureRegionSize(cgsme_tile_t ***grid, bool *visited, int width, int length, int startX, int startY)
+int measureRegionSize(talos_tile_t ***grid, bool *visited, int width, int length, int startX, int startY)
 {
     Point2D *queue = malloc(sizeof(Point2D) * width * length);
     if (!queue)
@@ -104,7 +104,7 @@ int measureRegionSize(cgsme_tile_t ***grid, bool *visited, int width, int length
 }
 
 // BFS to mark the main area adn delete everythign else
-void keepOnlyLargestMask(cgsme_tile_t ***grid, int width, int length, int height, int startX, int startY)
+void keepOnlyLargestMask(talos_tile_t ***grid, int width, int length, int height, int startX, int startY)
 {
     bool *isMain = calloc(width * length, sizeof(bool));
     if (!isMain)
@@ -160,7 +160,7 @@ void keepOnlyLargestMask(cgsme_tile_t ***grid, int width, int length, int height
 }
 
 // grow the edges of the mask by 1 pixel (dilation)
-int dilateMask(cgsme_tile_t ***grid, int width, int length, int height, int maxToAdd)
+int dilateMask(talos_tile_t ***grid, int width, int length, int height, int maxToAdd)
 {
     int added = 0;
     bool *toAdd = calloc(width * length, sizeof(bool));
@@ -211,7 +211,7 @@ done:
 
 // layer 0 island filter reusing scratch buffers
 static int keepOnlyLargestMaskLayer0(
-    cgsme_tile_t ***grid, int width, int length, int startX, int startY, bool *isMain, Point2D *queue)
+    talos_tile_t ***grid, int width, int length, int startX, int startY, bool *isMain, Point2D *queue)
 {
     memset(isMain, 0, (size_t)width * (size_t)length * sizeof(bool));
     int head = 0, tail = 0;
@@ -254,13 +254,13 @@ static int keepOnlyLargestMaskLayer0(
 }
 
 // RIDGED NOISE MASK GENERATION
-#define CGSME_NOISE_HIST_BINS 4096
+#define TALOS_NOISE_HIST_BINS 4096
 
-void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t targetFullness, uint32_t seed)
+void generateRidgedMask(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t targetFullness, uint32_t seed)
 {
-    CGSME_PROFILE_FUNC();
-#ifdef cgsme_DEBUG
-    if (cgsme_get_enabled())
+    TALOS_PROFILE_FUNC();
+#ifdef TALOS_DEBUG
+    if (talos_get_enabled())
     {
         printf("Generating Ridged Noise Mask (Fullness: %u%%)...\n", targetFullness);
         printf("  - Target filled pixels: ~%u\n", (uint32_t)((uint64_t)width * (uint64_t)length * (uint64_t)targetFullness / 100));
@@ -281,7 +281,7 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
     if (!scores)
         return;
 
-#ifdef cgsme_DEBUG
+#ifdef TALOS_DEBUG
     float *debugMap = malloc(sizeof(float) * totalPixels);
 #endif
 
@@ -294,7 +294,7 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
     float warpFreq = baseFreq * 0.5f; // warp is usually lower freq than the main noise
     float warpAmp = 4.0f;             // distort coordinates by 4 tiles
 
-    uint32_t hist[CGSME_NOISE_HIST_BINS] = {0};
+    uint32_t hist[TALOS_NOISE_HIST_BINS] = {0};
     uint32_t pIdx = 0;
     for (uint32_t y = 0; y < length; y++)
     {
@@ -321,12 +321,12 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
             if (ridge > 1.0f) ridge = 1.0f;
 
             scores[pIdx] = ridge;
-            uint32_t bin = (uint32_t)(ridge * (float)(CGSME_NOISE_HIST_BINS - 1));
-            if (bin >= CGSME_NOISE_HIST_BINS)
-                bin = CGSME_NOISE_HIST_BINS - 1;
+            uint32_t bin = (uint32_t)(ridge * (float)(TALOS_NOISE_HIST_BINS - 1));
+            if (bin >= TALOS_NOISE_HIST_BINS)
+                bin = TALOS_NOISE_HIST_BINS - 1;
             hist[bin]++;
 
-#ifdef cgsme_DEBUG
+#ifdef TALOS_DEBUG
             debugMap[pIdx] = ridge;
 #endif
 
@@ -334,7 +334,7 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
         }
     }
 
-#ifdef cgsme_DEBUG
+#ifdef TALOS_DEBUG
     saveNoiseDebug(debugMap, width, length);
     free(debugMap);
 #endif
@@ -342,7 +342,7 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
     // find cutoff histogram bin so we only sort the border bucket
     uint32_t aboveCount = 0;
     uint32_t cutBin = 0;
-    for (int b = CGSME_NOISE_HIST_BINS - 1; b >= 0; b--)
+    for (int b = TALOS_NOISE_HIST_BINS - 1; b >= 0; b--)
     {
         if (aboveCount + hist[b] >= targetCount)
         {
@@ -368,9 +368,9 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
         for (uint32_t x = 0; x < width; x++)
         {
             float ridge = scores[pIdx++];
-            uint32_t bin = (uint32_t)(ridge * (float)(CGSME_NOISE_HIST_BINS - 1));
-            if (bin >= CGSME_NOISE_HIST_BINS)
-                bin = CGSME_NOISE_HIST_BINS - 1;
+            uint32_t bin = (uint32_t)(ridge * (float)(TALOS_NOISE_HIST_BINS - 1));
+            if (bin >= TALOS_NOISE_HIST_BINS)
+                bin = TALOS_NOISE_HIST_BINS - 1;
 
             if (bin > cutBin)
             {
@@ -465,11 +465,11 @@ void generateRidgedMask(cgsme_tile_t ***grid, uint32_t width, uint32_t length, u
     for (uint32_t z = 1; z < height; z++)
     {
         for (uint32_t y = 0; y < length; y++)
-            memcpy(grid[z][y], grid[0][y], width * sizeof(cgsme_tile_t));
+            memcpy(grid[z][y], grid[0][y], width * sizeof(talos_tile_t));
     }
 
 // DEBUG DUMP
-#ifdef cgsme_DEBUG
+#ifdef TALOS_DEBUG
     saveBinaryMaskDebug(grid, width, length);
 #endif
 }
@@ -498,7 +498,7 @@ void saveNoiseDebug(float *noiseMap, uint32_t width, uint32_t length)
 }
 
 // Dumps the binary mask state to disk (0 = Void, 1 = Valid)
-void saveBinaryMaskDebug(cgsme_tile_t ***grid, uint32_t width, uint32_t length)
+void saveBinaryMaskDebug(talos_tile_t ***grid, uint32_t width, uint32_t length)
 {
     FILE *f = fopen("debug_mask.txt", "w");
     if (!f)
