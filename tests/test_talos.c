@@ -8,8 +8,8 @@
 #include <windows.h>
 #endif
 #include "generator.h"
-#include "cgsme_soft.h"
-#include "cgsme_ruleset.h"
+#include "talos_soft.h"
+#include "talos_ruleset.h"
 
 static int popcount64(uint64_t x)
 {
@@ -50,7 +50,7 @@ static double now_ms(void)
 #endif
 }
 
-static bool can_step_vertical(uint64_t loCell, uint64_t hiCell, const CgsmeRuleset *r)
+static bool can_step_vertical(uint64_t loCell, uint64_t hiCell, const TalosRuleset *r)
 {
     if (loCell == 0ULL || hiCell == 0ULL)
         return false;
@@ -73,7 +73,7 @@ static bool can_step_vertical(uint64_t loCell, uint64_t hiCell, const CgsmeRules
 static void verify_3d_reachability(
     uint64_t ***grid,
     uint32_t width, uint32_t length, uint32_t height,
-    const CgsmeRuleset *r,
+    const TalosRuleset *r,
     int *out_traversable, int *out_reached, int *out_unreachable)
 {
     static const int dx[4]  = {  0,  1,  0, -1 };
@@ -181,7 +181,7 @@ static void verify_3d_reachability(
 static void verify_soft_grid(
     uint64_t ***grid,
     uint32_t width, uint32_t length, uint32_t height,
-    const CgsmeRuleset *r,
+    const TalosRuleset *r,
     int *out_filled, int *out_mismatches, int *out_void_leaks, int *out_uncollapsed)
 {
     static const int dx[4]  = {  0,  1,  0, -1 };
@@ -286,14 +286,14 @@ static void verify_soft_grid(
 
 static int run_baked_vs_soft_case(uint32_t bw, uint32_t bl, uint32_t bh, uint32_t seed, uint32_t fulness, int runs)
 {
-    const CgsmeRuleset *r = cgsme_soft_get_ruleset();
+    const TalosRuleset *r = talos_soft_get_ruleset();
     double baked_min = 1e9, baked_sum = 0.0, baked_max = 0.0;
     double soft_min  = 1e9, soft_sum  = 0.0, soft_max  = 0.0;
     int total_diffs = 0, mm = 0, vl = 0, uc = 0, filled = 0;
     int total_unreach = 0, last_trav = 0, last_reach = 0;
 
     // warmup
-    cgsme_tile_t ***wb = generateGrid(bw, bl, bh, seed, fulness);
+    talos_tile_t ***wb = generateGrid(bw, bl, bh, seed, fulness);
     uint64_t ***ws = generateGrid_Soft(bw, bl, bh, seed, fulness);
     freeGrid(wb, bw, bl, bh);
     freeGrid_Soft(ws, bw, bl, bh);
@@ -303,7 +303,7 @@ static int run_baked_vs_soft_case(uint32_t bw, uint32_t bl, uint32_t bh, uint32_
         uint32_t cur_seed = seed + (uint32_t)i;
 
         double t0 = now_ms();
-        cgsme_tile_t ***g_baked = generateGrid(bw, bl, bh, cur_seed, fulness);
+        talos_tile_t ***g_baked = generateGrid(bw, bl, bh, cur_seed, fulness);
         double b_ms = now_ms() - t0;
 
         t0 = now_ms();
@@ -356,12 +356,12 @@ static int run_baked_vs_soft_case(uint32_t bw, uint32_t bl, uint32_t bh, uint32_
 
 static int run_soft_case(const char *json_path, uint32_t w, uint32_t l, uint32_t h, uint32_t fulness, int runs, bool check_3d_reach)
 {
-    if (!cgsme_soft_load_ruleset(json_path))
+    if (!talos_soft_load_ruleset(json_path))
     {
         fprintf(stderr, "failed to load %s\n", json_path);
         return 1;
     }
-    const CgsmeRuleset *r = cgsme_soft_get_ruleset();
+    const TalosRuleset *r = talos_soft_get_ruleset();
     uint32_t seeds[5] = { 1, 2, 5, 42, 99 };
     if (runs > 5) runs = 5;
 
@@ -436,7 +436,7 @@ int main(int argc, char **argv)
     int failures = 0;
 
     printf("1. tileset.json (baked vs soft parity + 3d reachability)\n\n");
-    if (!cgsme_soft_load_ruleset("tileset.json"))
+    if (!talos_soft_load_ruleset("tileset.json"))
     {
         fprintf(stderr, "failed to load tileset.json (run from repo root)\n");
         return 1;

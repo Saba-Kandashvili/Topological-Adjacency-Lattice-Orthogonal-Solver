@@ -1,4 +1,4 @@
-#include "cgsme_ruleset.h"
+#include "talos_ruleset.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,7 +6,7 @@
 
 // helper 
 // find socket index by name (returns -1 if not found)
-static int find_socket_idx(const CgsmeRuleset *r, const char *name)
+static int find_socket_idx(const TalosRuleset *r, const char *name)
 {
     for (int i = 0; i < r->num_sockets; i++)
     {
@@ -18,7 +18,7 @@ static int find_socket_idx(const CgsmeRuleset *r, const char *name)
 
 // helper
 // find category index by name (returns -1 if not found)
-static int find_category_idx(const CgsmeRuleset *r, const char *name)
+static int find_category_idx(const TalosRuleset *r, const char *name)
 {
     for (int i = 0; i < r->num_categories; i++)
     {
@@ -30,7 +30,7 @@ static int find_category_idx(const CgsmeRuleset *r, const char *name)
 
 // helper
 // find tile index by name (returns -1 if not found)
-static int find_tile_idx(const CgsmeRuleset *r, const char *name)
+static int find_tile_idx(const TalosRuleset *r, const char *name)
 {
     for (int i = 0; i < r->num_tiles; i++)
     {
@@ -40,7 +40,7 @@ static int find_tile_idx(const CgsmeRuleset *r, const char *name)
     return -1;
 }
 
-void cgsme_ruleset_build_tables(CgsmeRuleset *r)
+void talos_ruleset_build_tables(TalosRuleset *r)
 {
     // choose smallest unsigned integer container (8, 16, 32, or 64 bits)
     if (r->num_tiles <= 8)       r->container_bits = 8;
@@ -230,10 +230,10 @@ void cgsme_ruleset_build_tables(CgsmeRuleset *r)
     }
 
     // build flat category and anchor lookup arrays for runtime --soft mode
-    for (int t = 0; t < CGSME_MAX_TILES; t++)
+    for (int t = 0; t < TALOS_MAX_TILES; t++)
         r->bit_to_category[t] = (t < r->num_tiles) ? r->tiles[t].category_idx : 0u;
 
-    for (int c = 0; c < CGSME_MAX_CATEGORIES; c++)
+    for (int c = 0; c < TALOS_MAX_CATEGORIES; c++)
     {
         r->category_curve_pos[c]   = (c < r->num_categories) ? r->categories[c].curve_pos : 0.0f;
         r->category_mask_weight[c] = (c < r->num_categories) ? r->categories[c].mask_weight : 0.0f;
@@ -241,7 +241,7 @@ void cgsme_ruleset_build_tables(CgsmeRuleset *r)
         r->category_natural[c]     = (c < r->num_categories) ? r->categories[c].natural_spawn : false;
     }
 
-    for (int a = 0; a < CGSME_MAX_ANCHORS; a++)
+    for (int a = 0; a < TALOS_MAX_ANCHORS; a++)
     {
         if (a < r->num_anchors)
         {
@@ -363,7 +363,7 @@ static const char *find_matching_bracket(const char *open_pos, char open_ch, cha
     return NULL;
 }
 
-bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
+bool talos_ruleset_load_from_file(const char *filepath, TalosRuleset *r)
 {
     FILE *f = fopen(filepath, "rb");
     if (!f) return false;
@@ -381,7 +381,7 @@ bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
     buf[len] = '\0';
     fclose(f);
 
-    memset(r, 0, sizeof(CgsmeRuleset));
+    memset(r, 0, sizeof(TalosRuleset));
     const char *end = buf + len;
 
     // toplevel name & gaussian_config
@@ -408,7 +408,7 @@ bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
     {
         // pass 1: collect socket names and "open" bool
         const char *cur = socks_start + 1;
-        while (cur < socks_end && r->num_sockets < CGSME_MAX_SOCKETS)
+        while (cur < socks_end && r->num_sockets < TALOS_MAX_SOCKETS)
         {
             cur = skip_ws(cur);
             if (*cur != '"') break;
@@ -467,7 +467,7 @@ bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
     if (cats_start && cats_end)
     {
         const char *cur = cats_start + 1;
-        while (cur < cats_end && r->num_categories < CGSME_MAX_CATEGORIES)
+        while (cur < cats_end && r->num_categories < TALOS_MAX_CATEGORIES)
         {
             const char *obj = strchr(cur, '{');
             if (!obj || obj >= cats_end) break;
@@ -495,7 +495,7 @@ bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
     if (tiles_start && tiles_end)
     {
         const char *cur = tiles_start + 1;
-        while (cur < tiles_end && r->num_tiles < CGSME_MAX_TILES)
+        while (cur < tiles_end && r->num_tiles < TALOS_MAX_TILES)
         {
             const char *obj = strchr(cur, '{');
             if (!obj || obj >= tiles_end) break;
@@ -614,7 +614,7 @@ bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
         if (va && va_end)
         {
             const char *cur = va + 1;
-            while (cur < va_end && r->num_anchors < CGSME_MAX_ANCHORS)
+            while (cur < va_end && r->num_anchors < TALOS_MAX_ANCHORS)
             {
                 const char *obj = strchr(cur, '{');
                 if (!obj || obj >= va_end) break;
@@ -680,6 +680,6 @@ bool cgsme_ruleset_load_from_file(const char *filepath, CgsmeRuleset *r)
     }
 
     free(buf);
-    cgsme_ruleset_build_tables(r);
+    talos_ruleset_build_tables(r);
     return (r->num_tiles > 0);
 }

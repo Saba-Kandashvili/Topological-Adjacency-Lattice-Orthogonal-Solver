@@ -1,11 +1,11 @@
-#ifndef __cgsme_UTILS_H__
-#define __cgsme_UTILS_H__
+#ifndef TALOS_UTILS_H
+#define TALOS_UTILS_H
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include "cgsme_debug.h"
+#include "talos_debug.h"
 #include "tiles.h"
 
 // QUEUE FOR FLOOD FILL
@@ -48,7 +48,7 @@ void freeHeap(MinHeap *h);
 void swapNodes(MinHeap *h, uint32_t i, uint32_t j);
 void bubbleUp(MinHeap *h, uint32_t index);
 void bubbleDown(MinHeap *h, uint32_t index);
-void heapInsertOrUpdate(MinHeap *h, cgsme_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng);
-bool heapPop(MinHeap *h, cgsme_tile_t **grid, uint32_t *outX, uint32_t *outY);
+void heapInsertOrUpdate(MinHeap *h, talos_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng);
+bool heapPop(MinHeap *h, talos_tile_t **grid, uint32_t *outX, uint32_t *outY);
 
-#endif // __cgsme_UTILS_H__
+#endif // TALOS_UTILS_H

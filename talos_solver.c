@@ -1,37 +1,37 @@
-#include "cgsme_solver.h"
-#include "cgsme_debug.h"
-#include "cgsme_utils.h"
+#include "talos_solver.h"
+#include "talos_debug.h"
+#include "talos_utils.h"
 #include <math.h>
 
 // returns true if any collapsed neighbor has an open connection pointing to this tile
-bool isTileRequired(cgsme_tile_t **grid, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
+bool isTileRequired(talos_tile_t **grid, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	// check NORTH neighbor (y-1). Does it open SOUTH toward us?
-	if (y > 0 && CGSME_POPCOUNT(grid[y - 1][x]) == 1)
+	if (y > 0 && TALOS_POPCOUNT(grid[y - 1][x]) == 1)
 	{
-		if (grid[y - 1][x] & CGSME_HAS_PORT_MASK[DIR_IDX_S])
+		if (grid[y - 1][x] & TALOS_HAS_PORT_MASK[DIR_IDX_S])
 			return true;
 	}
 
 	// check SOUTH neighbor (y+1). Does it open NORTH toward us?
-	if (y < length - 1 && CGSME_POPCOUNT(grid[y + 1][x]) == 1)
+	if (y < length - 1 && TALOS_POPCOUNT(grid[y + 1][x]) == 1)
 	{
-		if (grid[y + 1][x] & CGSME_HAS_PORT_MASK[DIR_IDX_N])
+		if (grid[y + 1][x] & TALOS_HAS_PORT_MASK[DIR_IDX_N])
 			return true;
 	}
 
 	// check EAST neighbor (x+1). Does it open WEST toward us?
-	if (x < width - 1 && CGSME_POPCOUNT(grid[y][x + 1]) == 1)
+	if (x < width - 1 && TALOS_POPCOUNT(grid[y][x + 1]) == 1)
 	{
-		if (grid[y][x + 1] & CGSME_HAS_PORT_MASK[DIR_IDX_W])
+		if (grid[y][x + 1] & TALOS_HAS_PORT_MASK[DIR_IDX_W])
 			return true;
 	}
 
 	// check WEST neighbor (x-1). Does it open EAST toward us?
-	if (x > 0 && CGSME_POPCOUNT(grid[y][x - 1]) == 1)
+	if (x > 0 && TALOS_POPCOUNT(grid[y][x - 1]) == 1)
 	{
-		if (grid[y][x - 1] & CGSME_HAS_PORT_MASK[DIR_IDX_E])
+		if (grid[y][x - 1] & TALOS_HAS_PORT_MASK[DIR_IDX_E])
 			return true;
 	}
 
@@ -40,110 +40,110 @@ bool isTileRequired(cgsme_tile_t **grid, uint32_t width, uint32_t length, uint32
 
 // picks ONE set bit out of `options`, weighted by the category rates
 // iterates only over set bits: t &= (t - 1) clears the lowest set bit each step,
-// CGSME_CTZ(t) gives the index of the current lowest set bit
-static cgsme_tile_t pickWeightedTile(cgsme_tile_t options, const float *rates, uint32_t *rng)
+// TALOS_CTZ(t) gives the index of the current lowest set bit
+static talos_tile_t pickWeightedTile(talos_tile_t options, const float *rates, uint32_t *rng)
 {
 	// sum weights of valid options
 	float total_weight = 0.0f;
-	for (cgsme_tile_t t = options; t != 0; t &= (t - 1))
-		total_weight += rates[CGSME_BIT_TO_CATEGORY[CGSME_CTZ(t)]];
+	for (talos_tile_t t = options; t != 0; t &= (t - 1))
+		total_weight += rates[TALOS_BIT_TO_CATEGORY[TALOS_CTZ(t)]];
 
 	// if all weights are ~0 just pick uniformly
 	if (total_weight <= 0.0001f)
 	{
-		uint32_t r = nextRandom(rng) % (uint32_t)CGSME_POPCOUNT(options);
-		cgsme_tile_t t = options;
+		uint32_t r = nextRandom(rng) % (uint32_t)TALOS_POPCOUNT(options);
+		talos_tile_t t = options;
 		for (uint32_t k = 0; k < r; k++)
 			t &= (t - 1);
-		return CGSME_BIT(CGSME_CTZ(t));
+		return TALOS_BIT(TALOS_CTZ(t));
 	}
 
 	float random_01 = (float)nextRandom(rng) / 4294967296.0f;
 	float random_val = random_01 * total_weight;
 
-	for (cgsme_tile_t t = options; t != 0; t &= (t - 1))
+	for (talos_tile_t t = options; t != 0; t &= (t - 1))
 	{
-		int i = CGSME_CTZ(t);
-		random_val -= rates[CGSME_BIT_TO_CATEGORY[i]];
+		int i = TALOS_CTZ(t);
+		random_val -= rates[TALOS_BIT_TO_CATEGORY[i]];
 		if (random_val <= 0)
-			return CGSME_BIT(i);
+			return TALOS_BIT(i);
 	}
 
 	// float rounding fallback
-	cgsme_tile_t last = options;
+	talos_tile_t last = options;
 	while (last & (last - 1))
 		last &= (last - 1);
 	return last;
 }
 
 // collapseTile with spawnrates (smooth gaussian model that changes over time)
-void collapseTile(cgsme_tile_t *tile, float *rates, uint32_t *rng)
+void collapseTile(talos_tile_t *tile, float *rates, uint32_t *rng)
 {
-#ifdef cgsme_DEBUG
-	uint64_t __cgsme_collapse_start = cgsme_now_us();
-	uint64_t __cgsme_collapse_start_cycles = cgsme_now_cycles();
+#ifdef TALOS_DEBUG
+	uint64_t __talos_collapse_start = talos_now_us();
+	uint64_t __talos_collapse_start_cycles = talos_now_cycles();
 #endif
 	if (*tile == Empty_Tile)
 		return;
 
 	*tile = pickWeightedTile(*tile, rates, rng);
 
-#ifdef cgsme_DEBUG
-	if (cgsme_get_enabled())
+#ifdef TALOS_DEBUG
+	if (talos_get_enabled())
 	{
-		uint64_t __cgsme_collapse_end = cgsme_now_us();
-		uint64_t __cgsme_collapse_end_cycles = cgsme_now_cycles();
-		cgsme_profile_record("collapseTile", (unsigned long long)(__cgsme_collapse_end - __cgsme_collapse_start),
-							 (unsigned long long)(__cgsme_collapse_end_cycles - __cgsme_collapse_start_cycles));
+		uint64_t __talos_collapse_end = talos_now_us();
+		uint64_t __talos_collapse_end_cycles = talos_now_cycles();
+		talos_profile_record("collapseTile", (unsigned long long)(__talos_collapse_end - __talos_collapse_start),
+							 (unsigned long long)(__talos_collapse_end_cycles - __talos_collapse_start_cycles));
 	}
 #endif
 }
 
 // contradiction fallback: keep void/edge closure and pick best match against collapsed neighbors
-static cgsme_tile_t recoverCellCandidates(cgsme_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
+static talos_tile_t recoverCellCandidates(talos_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
 {
-	cgsme_tile_t voidOobMask = All_Possible_State;
+	talos_tile_t voidOobMask = All_Possible_State;
 	if (y == 0 || gridLayer[y - 1][x] == Empty_Tile)
-		voidOobMask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_S];
+		voidOobMask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_S];
 	if (x + 1 >= width || gridLayer[y][x + 1] == Empty_Tile)
-		voidOobMask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_W];
+		voidOobMask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_W];
 	if (y + 1 >= length || gridLayer[y + 1][x] == Empty_Tile)
-		voidOobMask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_N];
+		voidOobMask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_N];
 	if (x == 0 || gridLayer[y][x - 1] == Empty_Tile)
-		voidOobMask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_E];
+		voidOobMask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_E];
 
 	if (voidOobMask == Empty_Tile)
 		return Empty_Tile;
 
-	cgsme_tile_t nbMasks[4];
+	talos_tile_t nbMasks[4];
 	int nbCount = 0;
 
-	if (y > 0 && gridLayer[y - 1][x] != Empty_Tile && CGSME_POPCOUNT(gridLayer[y - 1][x]) == 1)
-		nbMasks[nbCount++] = CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y - 1][x])][DIR_IDX_S];
-	if (x + 1 < width && gridLayer[y][x + 1] != Empty_Tile && CGSME_POPCOUNT(gridLayer[y][x + 1]) == 1)
-		nbMasks[nbCount++] = CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y][x + 1])][DIR_IDX_W];
-	if (y + 1 < length && gridLayer[y + 1][x] != Empty_Tile && CGSME_POPCOUNT(gridLayer[y + 1][x]) == 1)
-		nbMasks[nbCount++] = CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y + 1][x])][DIR_IDX_N];
-	if (x > 0 && gridLayer[y][x - 1] != Empty_Tile && CGSME_POPCOUNT(gridLayer[y][x - 1]) == 1)
-		nbMasks[nbCount++] = CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y][x - 1])][DIR_IDX_E];
+	if (y > 0 && gridLayer[y - 1][x] != Empty_Tile && TALOS_POPCOUNT(gridLayer[y - 1][x]) == 1)
+		nbMasks[nbCount++] = TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y - 1][x])][DIR_IDX_S];
+	if (x + 1 < width && gridLayer[y][x + 1] != Empty_Tile && TALOS_POPCOUNT(gridLayer[y][x + 1]) == 1)
+		nbMasks[nbCount++] = TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y][x + 1])][DIR_IDX_W];
+	if (y + 1 < length && gridLayer[y + 1][x] != Empty_Tile && TALOS_POPCOUNT(gridLayer[y + 1][x]) == 1)
+		nbMasks[nbCount++] = TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y + 1][x])][DIR_IDX_N];
+	if (x > 0 && gridLayer[y][x - 1] != Empty_Tile && TALOS_POPCOUNT(gridLayer[y][x - 1]) == 1)
+		nbMasks[nbCount++] = TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y][x - 1])][DIR_IDX_E];
 
 	if (nbCount == 0)
 		return voidOobMask;
 
 	int bestScore = -1;
-	cgsme_tile_t bestMask = Empty_Tile;
+	talos_tile_t bestMask = Empty_Tile;
 
-	for (cgsme_tile_t rem = voidOobMask; rem != 0; rem &= (rem - 1))
+	for (talos_tile_t rem = voidOobMask; rem != 0; rem &= (rem - 1))
 	{
-		int bitIdx = CGSME_CTZ(rem);
-		cgsme_tile_t bit = CGSME_BIT(bitIdx);
+		int bitIdx = TALOS_CTZ(rem);
+		talos_tile_t bit = TALOS_BIT(bitIdx);
 		int matches = 0;
 		for (int k = 0; k < nbCount; k++)
 		{
 			if (nbMasks[k] & bit)
 				matches++;
 		}
-		int score = matches * 2 + (CGSME_CATEGORY_NATURAL[CGSME_BIT_TO_CATEGORY[bitIdx]] ? 1 : 0);
+		int score = matches * 2 + (TALOS_CATEGORY_NATURAL[TALOS_BIT_TO_CATEGORY[bitIdx]] ? 1 : 0);
 		if (score > bestScore)
 		{
 			bestScore = score;
@@ -158,34 +158,34 @@ static cgsme_tile_t recoverCellCandidates(cgsme_tile_t **gridLayer, uint32_t wid
 	return (bestMask != Empty_Tile) ? bestMask : voidOobMask;
 }
 
-cgsme_tile_t exactCellValidMask(cgsme_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
+talos_tile_t exactCellValidMask(talos_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y)
 {
-	cgsme_tile_t mask = All_Possible_State;
+	talos_tile_t mask = All_Possible_State;
 	if (y == 0 || gridLayer[y - 1][x] == Empty_Tile)
-		mask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_S];
-	else if (CGSME_POPCOUNT(gridLayer[y - 1][x]) == 1)
-		mask &= CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y - 1][x])][DIR_IDX_S];
+		mask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_S];
+	else if (TALOS_POPCOUNT(gridLayer[y - 1][x]) == 1)
+		mask &= TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y - 1][x])][DIR_IDX_S];
 
 	if (x + 1 >= width || gridLayer[y][x + 1] == Empty_Tile)
-		mask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_W];
-	else if (CGSME_POPCOUNT(gridLayer[y][x + 1]) == 1)
-		mask &= CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y][x + 1])][DIR_IDX_W];
+		mask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_W];
+	else if (TALOS_POPCOUNT(gridLayer[y][x + 1]) == 1)
+		mask &= TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y][x + 1])][DIR_IDX_W];
 
 	if (y + 1 >= length || gridLayer[y + 1][x] == Empty_Tile)
-		mask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_N];
-	else if (CGSME_POPCOUNT(gridLayer[y + 1][x]) == 1)
-		mask &= CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y + 1][x])][DIR_IDX_N];
+		mask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_N];
+	else if (TALOS_POPCOUNT(gridLayer[y + 1][x]) == 1)
+		mask &= TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y + 1][x])][DIR_IDX_N];
 
 	if (x == 0 || gridLayer[y][x - 1] == Empty_Tile)
-		mask &= CGSME_PROP_MASK[CGSME_NUM_TILES][DIR_IDX_E];
-	else if (CGSME_POPCOUNT(gridLayer[y][x - 1]) == 1)
-		mask &= CGSME_PROP_MASK[CGSME_CTZ(gridLayer[y][x - 1])][DIR_IDX_E];
+		mask &= TALOS_PROP_MASK[TALOS_NUM_TILES][DIR_IDX_E];
+	else if (TALOS_POPCOUNT(gridLayer[y][x - 1]) == 1)
+		mask &= TALOS_PROP_MASK[TALOS_CTZ(gridLayer[y][x - 1])][DIR_IDX_E];
 
 	return mask;
 }
 
 static bool backtrackPatch(
-	cgsme_tile_t **gridLayer, uint32_t width, uint32_t length,
+	talos_tile_t **gridLayer, uint32_t width, uint32_t length,
 	uint32_t cx, uint32_t cy, uint32_t radius, MinHeap *heap, uint32_t *rng)
 {
 	static const int32_t dx[4] = {  0,  1,  0, -1 };
@@ -211,7 +211,7 @@ static bool backtrackPatch(
 		{
 			if (gridLayer[py][px] == Empty_Tile)
 				continue;
-			cgsme_tile_t exact = exactCellValidMask(gridLayer, width, length, px, py);
+			talos_tile_t exact = exactCellValidMask(gridLayer, width, length, px, py);
 			if (exact == Empty_Tile)
 				return false;
 			gridLayer[py][px] = exact;
@@ -229,18 +229,18 @@ static bool backtrackPatch(
 		{
 			for (uint32_t px = x0; px <= x1; px++)
 			{
-				cgsme_tile_t cell = gridLayer[py][px];
+				talos_tile_t cell = gridLayer[py][px];
 				if (cell == Empty_Tile)
 					continue;
 
-				cgsme_tile_t u[4] = { Empty_Tile, Empty_Tile, Empty_Tile, Empty_Tile };
-				for (cgsme_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
+				talos_tile_t u[4] = { Empty_Tile, Empty_Tile, Empty_Tile, Empty_Tile };
+				for (talos_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
 				{
-					uint32_t tIdx = (uint32_t)CGSME_CTZ(tmp);
-					u[0] |= CGSME_PROP_MASK[tIdx][0];
-					u[1] |= CGSME_PROP_MASK[tIdx][1];
-					u[2] |= CGSME_PROP_MASK[tIdx][2];
-					u[3] |= CGSME_PROP_MASK[tIdx][3];
+					uint32_t tIdx = (uint32_t)TALOS_CTZ(tmp);
+					u[0] |= TALOS_PROP_MASK[tIdx][0];
+					u[1] |= TALOS_PROP_MASK[tIdx][1];
+					u[2] |= TALOS_PROP_MASK[tIdx][2];
+					u[3] |= TALOS_PROP_MASK[tIdx][3];
 				}
 
 				for (int d = 0; d < 4; d++)
@@ -249,10 +249,10 @@ static bool backtrackPatch(
 					int32_t ny = (int32_t)py + dy[d];
 					if (nx < (int32_t)x0 || nx > (int32_t)x1 || ny < (int32_t)y0 || ny > (int32_t)y1)
 						continue;
-					cgsme_tile_t oldN = gridLayer[ny][nx];
+					talos_tile_t oldN = gridLayer[ny][nx];
 					if (oldN == Empty_Tile)
 						continue;
-					cgsme_tile_t newN = oldN & u[d];
+					talos_tile_t newN = oldN & u[d];
 					if (newN == Empty_Tile)
 						return false;
 					if (newN != oldN)
@@ -271,7 +271,7 @@ static bool backtrackPatch(
 		{
 			for (uint32_t px = x0; px <= x1; px++)
 			{
-				if (CGSME_POPCOUNT(gridLayer[py][px]) > 1)
+				if (TALOS_POPCOUNT(gridLayer[py][px]) > 1)
 					heapInsertOrUpdate(heap, gridLayer, px, py, rng);
 			}
 		}
@@ -281,7 +281,7 @@ static bool backtrackPatch(
 }
 
 void backtrackNeighborhood(
-	cgsme_tile_t **gridLayer, uint32_t width, uint32_t length,
+	talos_tile_t **gridLayer, uint32_t width, uint32_t length,
 	uint32_t cx, uint32_t cy, MinHeap *heap, uint32_t *rng)
 {
 	for (uint32_t r = 1; r <= 4; r++)
@@ -301,7 +301,7 @@ void backtrackNeighborhood(
 			if (gridLayer[py][px] != Empty_Tile)
 			{
 				gridLayer[py][px] = recoverCellCandidates(gridLayer, width, length, px, py);
-				if (heap && CGSME_POPCOUNT(gridLayer[py][px]) > 1)
+				if (heap && TALOS_POPCOUNT(gridLayer[py][px]) > 1)
 					heapInsertOrUpdate(heap, gridLayer, px, py, rng);
 			}
 		}
@@ -313,40 +313,40 @@ typedef struct
 	uint32_t x, y;
 } SolverUnitPoint;
 
-#define CGSME_UNIT_PROP_CAP 1024
+#define TALOS_UNIT_PROP_CAP 1024
 
 static inline void propagateCellImmediate(
-	cgsme_tile_t **gridLayer, uint32_t width, uint32_t length,
+	talos_tile_t **gridLayer, uint32_t width, uint32_t length,
 	uint32_t cx, uint32_t cy, MinHeap *heap, uint32_t *rng,
 	SolverUnitPoint *queue, int *tail)
 {
 	static const int32_t dx[4] = {  0,  1,  0, -1 }; // N, E, S, W
 	static const int32_t dy[4] = { -1,  0,  1,  0 };
 
-	cgsme_tile_t cell = gridLayer[cy][cx];
-	cgsme_tile_t unionMasks[4];
-	const cgsme_tile_t *dirMasks = NULL;
+	talos_tile_t cell = gridLayer[cy][cx];
+	talos_tile_t unionMasks[4];
+	const talos_tile_t *dirMasks = NULL;
 
-	if (cell == Empty_Tile || CGSME_POPCOUNT(cell) == 1)
+	if (cell == Empty_Tile || TALOS_POPCOUNT(cell) == 1)
 	{
-		// row CGSME_NUM_TILES of CGSME_PROP_MASK is the Empty_Tile (void) row
-		uint32_t lut = (cell == Empty_Tile) ? (uint32_t)CGSME_NUM_TILES : (uint32_t)CGSME_CTZ(cell);
-		dirMasks = CGSME_PROP_MASK[lut];
+		// row TALOS_NUM_TILES of TALOS_PROP_MASK is the Empty_Tile (void) row
+		uint32_t lut = (cell == Empty_Tile) ? (uint32_t)TALOS_NUM_TILES : (uint32_t)TALOS_CTZ(cell);
+		dirMasks = TALOS_PROP_MASK[lut];
 	}
-	else if (CGSME_NUM_SOCKETS > 2)
+	else if (TALOS_NUM_SOCKETS > 2)
 	{
 		// union valid neighbor masks over remaining candidates (for multi-socket tilesets)
 		unionMasks[0] = Empty_Tile;
 		unionMasks[1] = Empty_Tile;
 		unionMasks[2] = Empty_Tile;
 		unionMasks[3] = Empty_Tile;
-		for (cgsme_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
+		for (talos_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
 		{
-			uint32_t tIdx = (uint32_t)CGSME_CTZ(tmp);
-			unionMasks[0] |= CGSME_PROP_MASK[tIdx][0];
-			unionMasks[1] |= CGSME_PROP_MASK[tIdx][1];
-			unionMasks[2] |= CGSME_PROP_MASK[tIdx][2];
-			unionMasks[3] |= CGSME_PROP_MASK[tIdx][3];
+			uint32_t tIdx = (uint32_t)TALOS_CTZ(tmp);
+			unionMasks[0] |= TALOS_PROP_MASK[tIdx][0];
+			unionMasks[1] |= TALOS_PROP_MASK[tIdx][1];
+			unionMasks[2] |= TALOS_PROP_MASK[tIdx][2];
+			unionMasks[3] |= TALOS_PROP_MASK[tIdx][3];
 		}
 		dirMasks = unionMasks;
 	}
@@ -365,13 +365,13 @@ static inline void propagateCellImmediate(
 		if (nx < 0 || ny < 0 || (uint32_t)nx >= width || (uint32_t)ny >= length)
 			continue;
 
-		cgsme_tile_t oldVal = gridLayer[ny][nx];
+		talos_tile_t oldVal = gridLayer[ny][nx];
 		if (oldVal == Empty_Tile)
 			continue;
 
-		if (CGSME_POPCOUNT(oldVal) == 1)
+		if (TALOS_POPCOUNT(oldVal) == 1)
 		{
-			if (CGSME_NUM_SOCKETS > 2 && (oldVal & dirMasks[d]) == 0)
+			if (TALOS_NUM_SOCKETS > 2 && (oldVal & dirMasks[d]) == 0)
 			{
 				backtrackNeighborhood(gridLayer, width, length, (uint32_t)nx, (uint32_t)ny, heap, rng);
 				*tail = 0;
@@ -380,12 +380,12 @@ static inline void propagateCellImmediate(
 			continue;
 		}
 
-		cgsme_tile_t newVal = oldVal & dirMasks[d];
+		talos_tile_t newVal = oldVal & dirMasks[d];
 		if (newVal == 0)
 		{
-			if (CGSME_NUM_SOCKETS > 2)
+			if (TALOS_NUM_SOCKETS > 2)
 			{
-				cgsme_tile_t exact = exactCellValidMask(gridLayer, width, length, (uint32_t)nx, (uint32_t)ny) & dirMasks[d];
+				talos_tile_t exact = exactCellValidMask(gridLayer, width, length, (uint32_t)nx, (uint32_t)ny) & dirMasks[d];
 				if (exact != Empty_Tile)
 				{
 					newVal = exact;
@@ -406,12 +406,12 @@ static inline void propagateCellImmediate(
 
 		if (newVal != oldVal)
 		{
-			if (CGSME_POPCOUNT(newVal) <= 1 || CGSME_NUM_SOCKETS > 2)
+			if (TALOS_POPCOUNT(newVal) <= 1 || TALOS_NUM_SOCKETS > 2)
 			{
-				if (*tail < CGSME_UNIT_PROP_CAP)
+				if (*tail < TALOS_UNIT_PROP_CAP)
 					queue[(*tail)++] = (SolverUnitPoint){ (uint32_t)nx, (uint32_t)ny };
 			}
-			if (CGSME_POPCOUNT(newVal) > 1 && heap)
+			if (TALOS_POPCOUNT(newVal) > 1 && heap)
 			{
 				heapInsertOrUpdate(heap, gridLayer, (uint32_t)nx, (uint32_t)ny, rng);
 			}
@@ -419,14 +419,14 @@ static inline void propagateCellImmediate(
 	}
 }
 
-void updateNeighbours(cgsme_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y, MinHeap *heap, uint32_t *rng)
+void updateNeighbours(talos_tile_t **gridLayer, uint32_t width, uint32_t length, uint32_t x, uint32_t y, MinHeap *heap, uint32_t *rng)
 {
-#ifdef cgsme_DEBUG
-	uint64_t __cgsme_neigh_start = cgsme_now_us();
-	uint64_t __cgsme_neigh_start_cycles = cgsme_now_cycles();
+#ifdef TALOS_DEBUG
+	uint64_t __talos_neigh_start = talos_now_us();
+	uint64_t __talos_neigh_start_cycles = talos_now_cycles();
 #endif
 
-	SolverUnitPoint queue[CGSME_UNIT_PROP_CAP];
+	SolverUnitPoint queue[TALOS_UNIT_PROP_CAP];
 	int head = 0, tail = 0;
 	propagateCellImmediate(gridLayer, width, length, x, y, heap, rng, queue, &tail);
 
@@ -436,22 +436,22 @@ void updateNeighbours(cgsme_tile_t **gridLayer, uint32_t width, uint32_t length,
 		propagateCellImmediate(gridLayer, width, length, cur.x, cur.y, heap, rng, queue, &tail);
 	}
 
-#ifdef cgsme_DEBUG
-	if (cgsme_get_enabled())
+#ifdef TALOS_DEBUG
+	if (talos_get_enabled())
 	{
-		uint64_t __cgsme_neigh_end = cgsme_now_us();
-		uint64_t __cgsme_neigh_end_cycles = cgsme_now_cycles();
-		cgsme_profile_record("updateNeighbours", (unsigned long long)(__cgsme_neigh_end - __cgsme_neigh_start),
-							 (unsigned long long)(__cgsme_neigh_end_cycles - __cgsme_neigh_start_cycles));
+		uint64_t __talos_neigh_end = talos_now_us();
+		uint64_t __talos_neigh_end_cycles = talos_now_cycles();
+		talos_profile_record("updateNeighbours", (unsigned long long)(__talos_neigh_end - __talos_neigh_start),
+							 (unsigned long long)(__talos_neigh_end_cycles - __talos_neigh_start_cycles));
 	}
 #endif
 }
 
 // scoring logic extracted to a helper
-float calculateScore(cgsme_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
+float calculateScore(talos_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
 {
-	CGSME_PROFILE_FUNC();
-	uint32_t bitNum = CGSME_POPCOUNT(grid[y][x]);
+	TALOS_PROFILE_FUNC();
+	uint32_t bitNum = TALOS_POPCOUNT(grid[y][x]);
 
 	// entropy only        lower entropy = higher priority
 	float score = (float)bitNum;
@@ -462,9 +462,9 @@ float calculateScore(cgsme_tile_t **grid, uint32_t x, uint32_t y, uint32_t *rng)
 }
 
 // finds the best spot to start a new island
-bool findBestSeedLocation(cgsme_tile_t **grid, uint32_t width, uint32_t length, uint32_t *outX, uint32_t *outY, uint32_t *rng)
+bool findBestSeedLocation(talos_tile_t **grid, uint32_t width, uint32_t length, uint32_t *outX, uint32_t *outY, uint32_t *rng)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 	float minScore = 1e9;
 	bool found = false;
 
@@ -472,13 +472,13 @@ bool findBestSeedLocation(cgsme_tile_t **grid, uint32_t width, uint32_t length, 
 	{
 		for (uint32_t j = 0; j < width; j++)
 		{
-			cgsme_tile_t tile = grid[i][j];
+			talos_tile_t tile = grid[i][j];
 
 			// Skip Empty (void) tiles
 			if (tile == Empty_Tile)
 				continue;
 
-			int popcount = CGSME_POPCOUNT(tile);
+			int popcount = TALOS_POPCOUNT(tile);
 
 			// skip already collapsed
 			if (popcount == 1)
@@ -489,7 +489,7 @@ bool findBestSeedLocation(cgsme_tile_t **grid, uint32_t width, uint32_t length, 
 			if (popcount == 0)
 			{
 				grid[i][j] = recoverCellCandidates(grid, width, length, j, i);
-				popcount = CGSME_POPCOUNT(grid[i][j]);
+				popcount = TALOS_POPCOUNT(grid[i][j]);
 				if (grid[i][j] == Empty_Tile)
 					continue;
 				if (popcount == 1)
@@ -520,7 +520,7 @@ bool findBestSeedLocation(cgsme_tile_t **grid, uint32_t width, uint32_t length, 
 
 void update_spawnrates(float rates[], int current_collapsed, int target_collapsed)
 {
-	CGSME_PROFILE_FUNC();
+	TALOS_PROFILE_FUNC();
 
 	// Progress = how much of the mask is filled (0.0 to 1.0)
 	float progress = (target_collapsed > 0) ? ((float)current_collapsed / (float)target_collapsed) : 0.0f;
@@ -530,33 +530,33 @@ void update_spawnrates(float rates[], int current_collapsed, int target_collapse
 	// the peak slides from 0 to the furthest curve_pos of any naturally spawning category
 	// (standard tileset: X=0 ... D=4)
 	float max_pos = 0.0f;
-	for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
+	for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
 	{
-		if (CGSME_CATEGORY_NATURAL[i] && CGSME_CATEGORY_CURVE_POS[i] > max_pos)
-			max_pos = CGSME_CATEGORY_CURVE_POS[i];
+		if (TALOS_CATEGORY_NATURAL[i] && TALOS_CATEGORY_CURVE_POS[i] > max_pos)
+			max_pos = TALOS_CATEGORY_CURVE_POS[i];
 	}
 
 	float peak_position = max_pos * progress;
-	float current_boost = CGSME_CONNECTOR_BOOST * (1.0f - progress); // strongest at start, fades to 0
-	float raw_weights[CGSME_MAX_CATEGORIES];
+	float current_boost = TALOS_CONNECTOR_BOOST * (1.0f - progress); // strongest at start, fades to 0
+	float raw_weights[TALOS_MAX_CATEGORIES];
 	float total_weight = 0.0f;
 
-	for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
+	for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
 	{
 		// categories like Special X are forbidden from natural spawning
-		if (!CGSME_CATEGORY_NATURAL[i])
+		if (!TALOS_CATEGORY_NATURAL[i])
 		{
 			raw_weights[i] = 0.0f;
 			continue;
 		}
 
 		// gaussian weight
-		float diff = CGSME_CATEGORY_CURVE_POS[i] - peak_position;
-		float exponent = -(diff * diff) / (2.0f * CGSME_GAUSS_WIDTH * CGSME_GAUSS_WIDTH);
+		float diff = TALOS_CATEGORY_CURVE_POS[i] - peak_position;
+		float exponent = -(diff * diff) / (2.0f * TALOS_GAUSS_WIDTH * TALOS_GAUSS_WIDTH);
 		raw_weights[i] = expf(exponent);
 
 		// connector boost (L and I in standard tileset)
-		if (CGSME_CATEGORY_BOOST[i])
+		if (TALOS_CATEGORY_BOOST[i])
 			raw_weights[i] += current_boost;
 
 		total_weight += raw_weights[i];
@@ -565,7 +565,7 @@ void update_spawnrates(float rates[], int current_collapsed, int target_collapse
 	// normalize
 	if (total_weight > 0.0f)
 	{
-		for (int i = 0; i < CGSME_NUM_CATEGORIES; ++i)
+		for (int i = 0; i < TALOS_NUM_CATEGORIES; ++i)
 			rates[i] = raw_weights[i] / total_weight;
 	}
 }
@@ -679,11 +679,11 @@ static inline void bubbleDownChunk3D(ChunkHeap3D *h, uint32_t index)
 	}
 }
 
-void chunkHeapInsertOrUpdate3D(ChunkHeap3D *h, cgsme_tile_t ***grid, uint32_t x, uint32_t y, uint32_t z, uint32_t *rng)
+void chunkHeapInsertOrUpdate3D(ChunkHeap3D *h, talos_tile_t ***grid, uint32_t x, uint32_t y, uint32_t z, uint32_t *rng)
 {
 	if (!h || x < h->x0 || x >= h->x0 + h->cw || y < h->y0 || y >= h->y0 + h->cl || z >= h->height)
 		return;
-	if (CGSME_POPCOUNT(grid[z][y][x]) <= 1)
+	if (TALOS_POPCOUNT(grid[z][y][x]) <= 1)
 		return;
 
 	uint32_t lx = x - h->x0;
@@ -719,7 +719,7 @@ void chunkHeapInsertOrUpdate3D(ChunkHeap3D *h, cgsme_tile_t ***grid, uint32_t x,
 	}
 }
 
-bool chunkHeapPop3D(ChunkHeap3D *h, cgsme_tile_t ***grid, uint32_t *outX, uint32_t *outY, uint32_t *outZ)
+bool chunkHeapPop3D(ChunkHeap3D *h, talos_tile_t ***grid, uint32_t *outX, uint32_t *outY, uint32_t *outZ)
 {
 	while (h && h->count > 0)
 	{
@@ -736,7 +736,7 @@ bool chunkHeapPop3D(ChunkHeap3D *h, cgsme_tile_t ***grid, uint32_t *outX, uint32
 		uint32_t x = h->x0 + (uint32_t)top.lx;
 		uint32_t y = h->y0 + (uint32_t)top.ly;
 		uint32_t z = (uint32_t)top.z;
-		if (CGSME_POPCOUNT(grid[z][y][x]) > 1)
+		if (TALOS_POPCOUNT(grid[z][y][x]) > 1)
 		{
 			*outX = x;
 			*outY = y;
@@ -747,43 +747,43 @@ bool chunkHeapPop3D(ChunkHeap3D *h, cgsme_tile_t ***grid, uint32_t *outX, uint32
 	return false;
 }
 
-cgsme_tile_t exactCellValidMask3D(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t x, uint32_t y, uint32_t z)
+talos_tile_t exactCellValidMask3D(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t x, uint32_t y, uint32_t z)
 {
-	cgsme_tile_t mask = exactCellValidMask(grid[z], width, length, x, y);
+	talos_tile_t mask = exactCellValidMask(grid[z], width, length, x, y);
 	if (height > 1)
 	{
 		if (z + 1 >= height || grid[z + 1][y][x] == Empty_Tile)
-			mask &= CGSME_VERT_PROP_MASK[CGSME_NUM_TILES][VERT_IDX_DOWN];
-		else if (CGSME_POPCOUNT(grid[z + 1][y][x]) == 1)
-			mask &= CGSME_VERT_PROP_MASK[CGSME_CTZ(grid[z + 1][y][x])][VERT_IDX_DOWN];
+			mask &= TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_DOWN];
+		else if (TALOS_POPCOUNT(grid[z + 1][y][x]) == 1)
+			mask &= TALOS_VERT_PROP_MASK[TALOS_CTZ(grid[z + 1][y][x])][VERT_IDX_DOWN];
 
 		if (z == 0 || grid[z - 1][y][x] == Empty_Tile)
-			mask &= CGSME_VERT_PROP_MASK[CGSME_NUM_TILES][VERT_IDX_UP];
-		else if (CGSME_POPCOUNT(grid[z - 1][y][x]) == 1)
-			mask &= CGSME_VERT_PROP_MASK[CGSME_CTZ(grid[z - 1][y][x])][VERT_IDX_UP];
+			mask &= TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_UP];
+		else if (TALOS_POPCOUNT(grid[z - 1][y][x]) == 1)
+			mask &= TALOS_VERT_PROP_MASK[TALOS_CTZ(grid[z - 1][y][x])][VERT_IDX_UP];
 	}
 	return mask;
 }
 
-static cgsme_tile_t recoverCellCandidates3D(cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t x, uint32_t y, uint32_t z)
+static talos_tile_t recoverCellCandidates3D(talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height, uint32_t x, uint32_t y, uint32_t z)
 {
-	cgsme_tile_t exact = exactCellValidMask3D(grid, width, length, height, x, y, z);
+	talos_tile_t exact = exactCellValidMask3D(grid, width, length, height, x, y, z);
 	if (exact != Empty_Tile)
 		return exact;
 
-	cgsme_tile_t base = recoverCellCandidates(grid[z], width, length, x, y);
+	talos_tile_t base = recoverCellCandidates(grid[z], width, length, x, y);
 	if (height > 1)
 	{
-		cgsme_tile_t vMask = All_Possible_State;
+		talos_tile_t vMask = All_Possible_State;
 		if (z + 1 >= height || grid[z + 1][y][x] == Empty_Tile)
-			vMask &= CGSME_VERT_PROP_MASK[CGSME_NUM_TILES][VERT_IDX_DOWN];
-		else if (CGSME_POPCOUNT(grid[z + 1][y][x]) == 1)
-			vMask &= CGSME_VERT_PROP_MASK[CGSME_CTZ(grid[z + 1][y][x])][VERT_IDX_DOWN];
+			vMask &= TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_DOWN];
+		else if (TALOS_POPCOUNT(grid[z + 1][y][x]) == 1)
+			vMask &= TALOS_VERT_PROP_MASK[TALOS_CTZ(grid[z + 1][y][x])][VERT_IDX_DOWN];
 
 		if (z == 0 || grid[z - 1][y][x] == Empty_Tile)
-			vMask &= CGSME_VERT_PROP_MASK[CGSME_NUM_TILES][VERT_IDX_UP];
-		else if (CGSME_POPCOUNT(grid[z - 1][y][x]) == 1)
-			vMask &= CGSME_VERT_PROP_MASK[CGSME_CTZ(grid[z - 1][y][x])][VERT_IDX_UP];
+			vMask &= TALOS_VERT_PROP_MASK[TALOS_NUM_TILES][VERT_IDX_UP];
+		else if (TALOS_POPCOUNT(grid[z - 1][y][x]) == 1)
+			vMask &= TALOS_VERT_PROP_MASK[TALOS_CTZ(grid[z - 1][y][x])][VERT_IDX_UP];
 
 		if ((base & vMask) != Empty_Tile)
 			base &= vMask;
@@ -794,7 +794,7 @@ static cgsme_tile_t recoverCellCandidates3D(cgsme_tile_t ***grid, uint32_t width
 }
 
 static bool backtrackChunkPatch3D(
-	cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+	talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
 	ChunkHeap3D *heap, uint32_t cx, uint32_t cy, uint32_t cz, uint32_t radius, uint32_t *rng)
 {
 	static const int32_t dx[4] = {  0,  1,  0, -1 };
@@ -810,15 +810,15 @@ static bool backtrackChunkPatch3D(
 	uint32_t x1 = (cx + radius < bx1) ? (cx + radius) : bx1;
 	uint32_t y1 = (cy + radius < by1) ? (cy + radius) : by1;
 
-	cgsme_tile_t naturalMask = Empty_Tile;
+	talos_tile_t naturalMask = Empty_Tile;
 	bool hasNatVert = false;
-	for (int t = 0; t < CGSME_NUM_TILES; t++)
+	for (int t = 0; t < TALOS_NUM_TILES; t++)
 	{
-		if (CGSME_CATEGORY_NATURAL[CGSME_BIT_TO_CATEGORY[t]])
+		if (TALOS_CATEGORY_NATURAL[TALOS_BIT_TO_CATEGORY[t]])
 		{
-			naturalMask |= CGSME_BIT(t);
-			if ((CGSME_VERT_PROP_MASK[t][0] & naturalMask) != naturalMask ||
-				(CGSME_VERT_PROP_MASK[t][1] & naturalMask) != naturalMask)
+			naturalMask |= TALOS_BIT(t);
+			if ((TALOS_VERT_PROP_MASK[t][0] & naturalMask) != naturalMask ||
+				(TALOS_VERT_PROP_MASK[t][1] & naturalMask) != naturalMask)
 				hasNatVert = true;
 		}
 	}
@@ -835,10 +835,10 @@ static bool backtrackChunkPatch3D(
 		{
 			for (uint32_t px = x0; px <= x1; px++)
 			{
-				cgsme_tile_t cur = grid[pz][py][px];
+				talos_tile_t cur = grid[pz][py][px];
 				if (cur == Empty_Tile)
 					continue;
-				if (CGSME_POPCOUNT(cur) == 1 && (cur & naturalMask) == Empty_Tile)
+				if (TALOS_POPCOUNT(cur) == 1 && (cur & naturalMask) == Empty_Tile)
 					continue;
 				grid[pz][py][px] = naturalMask;
 			}
@@ -851,12 +851,12 @@ static bool backtrackChunkPatch3D(
 		{
 			for (uint32_t px = x0; px <= x1; px++)
 			{
-				cgsme_tile_t cur = grid[pz][py][px];
+				talos_tile_t cur = grid[pz][py][px];
 				if (cur == Empty_Tile)
 					continue;
-				if (CGSME_POPCOUNT(cur) == 1 && (cur & naturalMask) == Empty_Tile)
+				if (TALOS_POPCOUNT(cur) == 1 && (cur & naturalMask) == Empty_Tile)
 					continue;
-				cgsme_tile_t exact = exactCellValidMask3D(grid, width, length, height, px, py, pz) & naturalMask;
+				talos_tile_t exact = exactCellValidMask3D(grid, width, length, height, px, py, pz) & naturalMask;
 				if (exact == Empty_Tile)
 					return false;
 				grid[pz][py][px] = exact;
@@ -877,21 +877,21 @@ static bool backtrackChunkPatch3D(
 			{
 				for (uint32_t px = x0; px <= x1; px++)
 				{
-					cgsme_tile_t cell = grid[pz][py][px];
+					talos_tile_t cell = grid[pz][py][px];
 					if (cell == Empty_Tile)
 						continue;
 
-					cgsme_tile_t u[4] = { Empty_Tile, Empty_Tile, Empty_Tile, Empty_Tile };
-					cgsme_tile_t vu[2] = { Empty_Tile, Empty_Tile };
-					for (cgsme_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
+					talos_tile_t u[4] = { Empty_Tile, Empty_Tile, Empty_Tile, Empty_Tile };
+					talos_tile_t vu[2] = { Empty_Tile, Empty_Tile };
+					for (talos_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
 					{
-						uint32_t tIdx = (uint32_t)CGSME_CTZ(tmp);
-						u[0] |= CGSME_PROP_MASK[tIdx][0];
-						u[1] |= CGSME_PROP_MASK[tIdx][1];
-						u[2] |= CGSME_PROP_MASK[tIdx][2];
-						u[3] |= CGSME_PROP_MASK[tIdx][3];
-						vu[0] |= CGSME_VERT_PROP_MASK[tIdx][0];
-						vu[1] |= CGSME_VERT_PROP_MASK[tIdx][1];
+						uint32_t tIdx = (uint32_t)TALOS_CTZ(tmp);
+						u[0] |= TALOS_PROP_MASK[tIdx][0];
+						u[1] |= TALOS_PROP_MASK[tIdx][1];
+						u[2] |= TALOS_PROP_MASK[tIdx][2];
+						u[3] |= TALOS_PROP_MASK[tIdx][3];
+						vu[0] |= TALOS_VERT_PROP_MASK[tIdx][0];
+						vu[1] |= TALOS_VERT_PROP_MASK[tIdx][1];
 					}
 
 					for (int d = 0; d < 4; d++)
@@ -900,10 +900,10 @@ static bool backtrackChunkPatch3D(
 						int32_t ny = (int32_t)py + dy[d];
 						if (nx < (int32_t)x0 || nx > (int32_t)x1 || ny < (int32_t)y0 || ny > (int32_t)y1)
 							continue;
-						cgsme_tile_t oldN = grid[pz][ny][nx];
+						talos_tile_t oldN = grid[pz][ny][nx];
 						if (oldN == Empty_Tile)
 							continue;
-						cgsme_tile_t newN = oldN & u[d];
+						talos_tile_t newN = oldN & u[d];
 						if (newN == Empty_Tile)
 							return false;
 						if (newN != oldN)
@@ -920,10 +920,10 @@ static bool backtrackChunkPatch3D(
 							int32_t nz = (vd == VERT_IDX_UP) ? ((int32_t)pz + 1) : ((int32_t)pz - 1);
 							if (nz < (int32_t)z0 || nz > (int32_t)z1)
 								continue;
-							cgsme_tile_t oldN = grid[nz][py][px];
+							talos_tile_t oldN = grid[nz][py][px];
 							if (oldN == Empty_Tile)
 								continue;
-							cgsme_tile_t newN = oldN & vu[vd];
+							talos_tile_t newN = oldN & vu[vd];
 							if (newN == Empty_Tile)
 								return false;
 							if (newN != oldN)
@@ -946,7 +946,7 @@ static bool backtrackChunkPatch3D(
 			{
 				for (uint32_t px = x0; px <= x1; px++)
 				{
-					if (CGSME_POPCOUNT(grid[pz][py][px]) > 1)
+					if (TALOS_POPCOUNT(grid[pz][py][px]) > 1)
 						chunkHeapInsertOrUpdate3D(heap, grid, px, py, pz, rng);
 				}
 			}
@@ -956,7 +956,7 @@ static bool backtrackChunkPatch3D(
 }
 
 void backtrackChunkNeighborhood3D(
-	cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+	talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
 	ChunkHeap3D *heap, uint32_t cx, uint32_t cy, uint32_t cz, uint32_t *rng)
 {
 	for (uint32_t r = 1; r <= 4; r++)
@@ -982,7 +982,7 @@ void backtrackChunkNeighborhood3D(
 			if (grid[cz][py][px] != Empty_Tile)
 			{
 				grid[cz][py][px] = recoverCellCandidates3D(grid, width, length, height, px, py, cz);
-				if (heap && CGSME_POPCOUNT(grid[cz][py][px]) > 1)
+				if (heap && TALOS_POPCOUNT(grid[cz][py][px]) > 1)
 					chunkHeapInsertOrUpdate3D(heap, grid, px, py, cz, rng);
 			}
 		}
@@ -995,7 +995,7 @@ typedef struct
 } SolverUnitPoint3D;
 
 static inline void propagateCellImmediate3D(
-	cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+	talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
 	ChunkHeap3D *heap, uint32_t cx, uint32_t cy, uint32_t cz, uint32_t *rng,
 	SolverUnitPoint3D *queue, int *tail)
 {
@@ -1007,19 +1007,19 @@ static inline void propagateCellImmediate3D(
 	uint32_t bx1 = heap ? (heap->x0 + heap->cw - 1) : (width - 1);
 	uint32_t by1 = heap ? (heap->y0 + heap->cl - 1) : (length - 1);
 
-	cgsme_tile_t cell = grid[cz][cy][cx];
-	cgsme_tile_t unionMasks[4];
-	cgsme_tile_t vertUnion[2];
-	const cgsme_tile_t *dirMasks = NULL;
-	const cgsme_tile_t *vertMasks = NULL;
-	bool isMultiRule = (CGSME_NUM_SOCKETS > 2) ||
-		(CGSME_VERT_PROP_MASK[0][0] != All_Possible_State && CGSME_VERT_PROP_MASK[0][1] != All_Possible_State);
+	talos_tile_t cell = grid[cz][cy][cx];
+	talos_tile_t unionMasks[4];
+	talos_tile_t vertUnion[2];
+	const talos_tile_t *dirMasks = NULL;
+	const talos_tile_t *vertMasks = NULL;
+	bool isMultiRule = (TALOS_NUM_SOCKETS > 2) ||
+		(TALOS_VERT_PROP_MASK[0][0] != All_Possible_State && TALOS_VERT_PROP_MASK[0][1] != All_Possible_State);
 
-	if (cell == Empty_Tile || CGSME_POPCOUNT(cell) == 1)
+	if (cell == Empty_Tile || TALOS_POPCOUNT(cell) == 1)
 	{
-		uint32_t lut = (cell == Empty_Tile) ? (uint32_t)CGSME_NUM_TILES : (uint32_t)CGSME_CTZ(cell);
-		dirMasks  = CGSME_PROP_MASK[lut];
-		vertMasks = CGSME_VERT_PROP_MASK[lut];
+		uint32_t lut = (cell == Empty_Tile) ? (uint32_t)TALOS_NUM_TILES : (uint32_t)TALOS_CTZ(cell);
+		dirMasks  = TALOS_PROP_MASK[lut];
+		vertMasks = TALOS_VERT_PROP_MASK[lut];
 	}
 	else if (isMultiRule)
 	{
@@ -1029,15 +1029,15 @@ static inline void propagateCellImmediate3D(
 		unionMasks[3] = Empty_Tile;
 		vertUnion[0]  = Empty_Tile;
 		vertUnion[1]  = Empty_Tile;
-		for (cgsme_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
+		for (talos_tile_t tmp = cell; tmp != 0; tmp &= (tmp - 1))
 		{
-			uint32_t tIdx = (uint32_t)CGSME_CTZ(tmp);
-			unionMasks[0] |= CGSME_PROP_MASK[tIdx][0];
-			unionMasks[1] |= CGSME_PROP_MASK[tIdx][1];
-			unionMasks[2] |= CGSME_PROP_MASK[tIdx][2];
-			unionMasks[3] |= CGSME_PROP_MASK[tIdx][3];
-			vertUnion[0]  |= CGSME_VERT_PROP_MASK[tIdx][0];
-			vertUnion[1]  |= CGSME_VERT_PROP_MASK[tIdx][1];
+			uint32_t tIdx = (uint32_t)TALOS_CTZ(tmp);
+			unionMasks[0] |= TALOS_PROP_MASK[tIdx][0];
+			unionMasks[1] |= TALOS_PROP_MASK[tIdx][1];
+			unionMasks[2] |= TALOS_PROP_MASK[tIdx][2];
+			unionMasks[3] |= TALOS_PROP_MASK[tIdx][3];
+			vertUnion[0]  |= TALOS_VERT_PROP_MASK[tIdx][0];
+			vertUnion[1]  |= TALOS_VERT_PROP_MASK[tIdx][1];
 		}
 		dirMasks  = unionMasks;
 		vertMasks = vertUnion;
@@ -1058,11 +1058,11 @@ static inline void propagateCellImmediate3D(
 		if (nx < (int32_t)bx0 || ny < (int32_t)by0 || (uint32_t)nx > bx1 || (uint32_t)ny > by1)
 			continue;
 
-		cgsme_tile_t oldVal = grid[cz][ny][nx];
+		talos_tile_t oldVal = grid[cz][ny][nx];
 		if (oldVal == Empty_Tile)
 			continue;
 
-		if (CGSME_POPCOUNT(oldVal) == 1)
+		if (TALOS_POPCOUNT(oldVal) == 1)
 		{
 			if (isMultiRule && (oldVal & dirMasks[d]) == 0)
 			{
@@ -1073,12 +1073,12 @@ static inline void propagateCellImmediate3D(
 			continue;
 		}
 
-		cgsme_tile_t newVal = oldVal & dirMasks[d];
+		talos_tile_t newVal = oldVal & dirMasks[d];
 		if (newVal == 0)
 		{
 			if (isMultiRule)
 			{
-				cgsme_tile_t exact = exactCellValidMask3D(grid, width, length, height, (uint32_t)nx, (uint32_t)ny, cz) & dirMasks[d];
+				talos_tile_t exact = exactCellValidMask3D(grid, width, length, height, (uint32_t)nx, (uint32_t)ny, cz) & dirMasks[d];
 				if (exact != Empty_Tile)
 				{
 					newVal = exact;
@@ -1099,12 +1099,12 @@ static inline void propagateCellImmediate3D(
 
 		if (newVal != oldVal)
 		{
-			if (CGSME_POPCOUNT(newVal) <= 1 || isMultiRule)
+			if (TALOS_POPCOUNT(newVal) <= 1 || isMultiRule)
 			{
-				if (*tail < CGSME_UNIT_PROP_CAP)
+				if (*tail < TALOS_UNIT_PROP_CAP)
 					queue[(*tail)++] = (SolverUnitPoint3D){ (uint16_t)nx, (uint16_t)ny, (uint16_t)cz };
 			}
-			if (CGSME_POPCOUNT(newVal) > 1 && heap)
+			if (TALOS_POPCOUNT(newVal) > 1 && heap)
 			{
 				chunkHeapInsertOrUpdate3D(heap, grid, (uint32_t)nx, (uint32_t)ny, cz, rng);
 			}
@@ -1123,11 +1123,11 @@ static inline void propagateCellImmediate3D(
 			if (nz < 0 || (uint32_t)nz >= height)
 				continue;
 
-			cgsme_tile_t oldVal = grid[nz][cy][cx];
+			talos_tile_t oldVal = grid[nz][cy][cx];
 			if (oldVal == Empty_Tile)
 				continue;
 
-			if (CGSME_POPCOUNT(oldVal) == 1)
+			if (TALOS_POPCOUNT(oldVal) == 1)
 			{
 				if (isMultiRule && (oldVal & vertMasks[vd]) == 0)
 				{
@@ -1138,12 +1138,12 @@ static inline void propagateCellImmediate3D(
 				continue;
 			}
 
-			cgsme_tile_t newVal = oldVal & vertMasks[vd];
+			talos_tile_t newVal = oldVal & vertMasks[vd];
 			if (newVal == 0)
 			{
 				if (isMultiRule)
 				{
-					cgsme_tile_t exact = exactCellValidMask3D(grid, width, length, height, cx, cy, (uint32_t)nz) & vertMasks[vd];
+					talos_tile_t exact = exactCellValidMask3D(grid, width, length, height, cx, cy, (uint32_t)nz) & vertMasks[vd];
 					if (exact != Empty_Tile)
 					{
 						newVal = exact;
@@ -1164,12 +1164,12 @@ static inline void propagateCellImmediate3D(
 
 			if (newVal != oldVal)
 			{
-				if (CGSME_POPCOUNT(newVal) <= 1 || isMultiRule)
+				if (TALOS_POPCOUNT(newVal) <= 1 || isMultiRule)
 				{
-					if (*tail < CGSME_UNIT_PROP_CAP)
+					if (*tail < TALOS_UNIT_PROP_CAP)
 						queue[(*tail)++] = (SolverUnitPoint3D){ (uint16_t)cx, (uint16_t)cy, (uint16_t)nz };
 				}
-				if (CGSME_POPCOUNT(newVal) > 1 && heap)
+				if (TALOS_POPCOUNT(newVal) > 1 && heap)
 				{
 					chunkHeapInsertOrUpdate3D(heap, grid, cx, cy, (uint32_t)nz, rng);
 				}
@@ -1179,10 +1179,10 @@ static inline void propagateCellImmediate3D(
 }
 
 void updateNeighboursChunk3D(
-	cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+	talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
 	ChunkHeap3D *heap, uint32_t x, uint32_t y, uint32_t z, uint32_t *rng)
 {
-	SolverUnitPoint3D queue[CGSME_UNIT_PROP_CAP];
+	SolverUnitPoint3D queue[TALOS_UNIT_PROP_CAP];
 	int head = 0, tail = 0;
 	propagateCellImmediate3D(grid, width, length, height, heap, x, y, z, rng, queue, &tail);
 
@@ -1194,7 +1194,7 @@ void updateNeighboursChunk3D(
 }
 
 bool findBestSeedLocationChunk3D(
-	cgsme_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
+	talos_tile_t ***grid, uint32_t width, uint32_t length, uint32_t height,
 	ChunkHeap3D *heap, uint32_t *outX, uint32_t *outY, uint32_t *outZ, uint32_t *rng)
 {
 	float minScore = 1e9f;
@@ -1211,18 +1211,18 @@ bool findBestSeedLocationChunk3D(
 		{
 			for (uint32_t j = bx0; j <= bx1; j++)
 			{
-				cgsme_tile_t tile = grid[z][i][j];
+				talos_tile_t tile = grid[z][i][j];
 				if (tile == Empty_Tile)
 					continue;
 
-				int popcount = CGSME_POPCOUNT(tile);
+				int popcount = TALOS_POPCOUNT(tile);
 				if (popcount == 1)
 					continue;
 
 				if (popcount == 0)
 				{
 					grid[z][i][j] = recoverCellCandidates3D(grid, width, length, height, j, i, z);
-					popcount = CGSME_POPCOUNT(grid[z][i][j]);
+					popcount = TALOS_POPCOUNT(grid[z][i][j]);
 					if (grid[z][i][j] == Empty_Tile)
 						continue;
 					if (popcount == 1)

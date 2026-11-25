@@ -17,7 +17,7 @@ resolve_tileset() {
     fi
 }
 
-TILESET_FILE="${CGSME_TILESET:-$ROOT_DIR/tileset.json}"
+TILESET_FILE="${TALOS_TILESET:-$ROOT_DIR/tileset.json}"
 SOFT_MODE=0
 FORWARD_ARGS=()
 
@@ -62,16 +62,16 @@ compile_debug_gen() {
     echo "---------------------------------------------------"
     echo "1. Compiling C Code (Baked + Soft Mode)..."
     echo "---------------------------------------------------"
-    gcc -std=c11 -O3 -g -Dcgsme_DEBUG -D_GNU_SOURCE \
+    gcc -std=c11 -O3 -g -DTALOS_DEBUG -D_GNU_SOURCE \
         "$SCRIPT_DIR/main.c" \
-        "$ROOT_DIR/cgsme_ruleset.c" \
-        "$ROOT_DIR/cgsme_soft.c" \
+        "$ROOT_DIR/talos_ruleset.c" \
+        "$ROOT_DIR/talos_soft.c" \
         "$ROOT_DIR/generator.c" \
-        "$ROOT_DIR/cgsme_debug.c" \
-        "$ROOT_DIR/cgsme_utils.c" \
-        "$ROOT_DIR/cgsme_noise.c" \
-        "$ROOT_DIR/cgsme_topology.c" \
-        "$ROOT_DIR/cgsme_solver.c" \
+        "$ROOT_DIR/talos_debug.c" \
+        "$ROOT_DIR/talos_utils.c" \
+        "$ROOT_DIR/talos_noise.c" \
+        "$ROOT_DIR/talos_topology.c" \
+        "$ROOT_DIR/talos_solver.c" \
         "$ROOT_DIR/tinycthread/tinycthread.c" \
         -o "$SCRIPT_DIR/debug_gen.exe" -I"$ROOT_DIR" -pthread -lm
     if [ $? -ne 0 ]; then
@@ -88,9 +88,9 @@ if [ "$SOFT_MODE" -eq 1 ]; then
     echo "---------------------------------------------------"
     echo "0. Soft Mode Enabled (${TILESET_FILE}) - Skipping Codegen"
     echo "---------------------------------------------------"
-    if [ ! -f "$ROOT_DIR/cgsme_tileset_baked.h" ]; then
-        gcc -std=c11 -O2 "$ROOT_DIR/cgsme_codegen.c" "$ROOT_DIR/cgsme_ruleset.c" -I"$ROOT_DIR" -o "$SCRIPT_DIR/cgsme_codegen.exe" \
-            && "$SCRIPT_DIR/cgsme_codegen.exe" "$ROOT_DIR/tileset.json" "$ROOT_DIR/cgsme_tileset_baked.h"
+    if [ ! -f "$ROOT_DIR/talos_tileset_baked.h" ]; then
+        gcc -std=c11 -O2 "$ROOT_DIR/talos_codegen.c" "$ROOT_DIR/talos_ruleset.c" -I"$ROOT_DIR" -o "$SCRIPT_DIR/talos_codegen.exe" \
+            && "$SCRIPT_DIR/talos_codegen.exe" "$ROOT_DIR/tileset.json" "$ROOT_DIR/talos_tileset_baked.h"
     fi
     NEEDS_COMPILE=0
     if [ ! -x "$SCRIPT_DIR/debug_gen.exe" ]; then
@@ -109,13 +109,13 @@ if [ "$SOFT_MODE" -eq 1 ]; then
     echo "---------------------------------------------------"
     echo "2. Running Generator (--soft ${TILESET_FILE})..."
     echo "---------------------------------------------------"
-    "$SCRIPT_DIR/debug_gen.exe" --cgsme-debug --soft "$TILESET_FILE" "${FORWARD_ARGS[@]}"
+    "$SCRIPT_DIR/debug_gen.exe" --talos-debug --soft "$TILESET_FILE" "${FORWARD_ARGS[@]}"
 else
     echo "---------------------------------------------------"
-    echo "0. Baking ${TILESET_FILE} -> cgsme_tileset_baked.h..."
+    echo "0. Baking ${TILESET_FILE} -> talos_tileset_baked.h..."
     echo "---------------------------------------------------"
-    gcc -std=c11 -O2 "$ROOT_DIR/cgsme_codegen.c" "$ROOT_DIR/cgsme_ruleset.c" -I"$ROOT_DIR" -o "$SCRIPT_DIR/cgsme_codegen.exe" \
-        && "$SCRIPT_DIR/cgsme_codegen.exe" "$TILESET_FILE" "$ROOT_DIR/cgsme_tileset_baked.h"
+    gcc -std=c11 -O2 "$ROOT_DIR/talos_codegen.c" "$ROOT_DIR/talos_ruleset.c" -I"$ROOT_DIR" -o "$SCRIPT_DIR/talos_codegen.exe" \
+        && "$SCRIPT_DIR/talos_codegen.exe" "$TILESET_FILE" "$ROOT_DIR/talos_tileset_baked.h"
     if [ $? -ne 0 ]; then
         echo "Tileset baking failed!"
         read -r -p "Press Enter to exit..."
@@ -127,7 +127,7 @@ else
     echo "---------------------------------------------------"
     echo "2. Running Generator (Baked)..."
     echo "---------------------------------------------------"
-    "$SCRIPT_DIR/debug_gen.exe" --cgsme-debug "${FORWARD_ARGS[@]}"
+    "$SCRIPT_DIR/debug_gen.exe" --talos-debug "${FORWARD_ARGS[@]}"
 fi
 
 echo ""
@@ -135,7 +135,7 @@ echo "---------------------------------------------------"
 echo "3. Launching Visualizer..."
 echo "---------------------------------------------------"
 
-CGSME_TILESET="$TILESET_FILE" love "$SCRIPT_DIR"
+TALOS_TILESET="$TILESET_FILE" love "$SCRIPT_DIR"
 
 echo "Done."
 
